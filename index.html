@@ -1,0 +1,1478 @@
+// ══════════════════════════════════════════════════════════════════
+// DATA STORE — All project data loaded from Excel
+// ══════════════════════════════════════════════════════════════════
+const PM_COLORS = {
+  'Sourabh': { bg: 'rgba(0,212,255,0.15)', color: '#00d4ff' },
+  'Harshit': { bg: 'rgba(168,85,247,0.15)', color: '#a855f7' },
+  'Harsh Gaur': { bg: 'rgba(255,107,53,0.15)', color: '#ff6b35' },
+  'Dipender': { bg: 'rgba(255,179,71,0.15)', color: '#ffb347' },
+  'Sunil': { bg: 'rgba(0,184,160,0.15)', color: '#00b8a0' },
+  'HARSHIT': { bg: 'rgba(168,85,247,0.15)', color: '#a855f7' },
+  'SUNIL': { bg: 'rgba(0,184,160,0.15)', color: '#00b8a0' },
+};
+
+
+// ── PROJECT STATUS HELPERS ──
+const PROJECT_STATUSES = [
+  'EXECUTION', 'BILL PENDING', 'BILL DONE', 'APPROVAL STAGE',
+  'CIT DONE', 'HANDOVER STAGE', 'HANDOVER DONE', 'COMPLETED', 'HOLD', 'CLOSED'
+];
+
+const STATUS_COLORS = {
+  'EXECUTION':      { bg:'rgba(0,212,255,0.12)',  color:'#00d4ff',  border:'rgba(0,212,255,0.3)' },
+  'BILL PENDING':   { bg:'rgba(255,179,71,0.12)', color:'#ffb347',  border:'rgba(255,179,71,0.3)' },
+  'BILL DONE':      { bg:'rgba(57,255,154,0.12)', color:'#39ff9a',  border:'rgba(57,255,154,0.3)' },
+  'APPROVAL STAGE': { bg:'rgba(168,85,247,0.12)', color:'#a855f7',  border:'rgba(168,85,247,0.3)' },
+  'CIT DONE':       { bg:'rgba(0,184,160,0.12)',  color:'#00b8a0',  border:'rgba(0,184,160,0.3)' },
+  'HANDOVER STAGE': { bg:'rgba(255,107,53,0.12)', color:'#ff6b35',  border:'rgba(255,107,53,0.3)' },
+  'HANDOVER DONE':  { bg:'rgba(255,107,53,0.2)',  color:'#ff8c5a',  border:'rgba(255,107,53,0.4)' },
+  'COMPLETED':      { bg:'rgba(57,255,154,0.2)',  color:'#00ff88',  border:'rgba(57,255,154,0.5)' },
+  'HOLD':           { bg:'rgba(255,77,109,0.12)', color:'#ff4d6d',  border:'rgba(255,77,109,0.3)' },
+  'CLOSED':         { bg:'rgba(61,90,120,0.2)',   color:'#6a96c0',  border:'rgba(61,90,120,0.4)' },
+};
+
+// Custom statuses — stored separately in localStorage, never mixed with project data
+const CUSTOM_STATUS_KEY = 'onepws_custom_statuses_v1';
+
+// 12 distinct color palettes for custom statuses (cycles through them)
+const CUSTOM_PALETTE = [
+  { bg:'rgba(255,215,0,0.12)',    color:'#ffd700',  border:'rgba(255,215,0,0.35)' },
+  { bg:'rgba(255,105,180,0.12)',  color:'#ff69b4',  border:'rgba(255,105,180,0.35)' },
+  { bg:'rgba(100,200,100,0.12)',  color:'#64c864',  border:'rgba(100,200,100,0.35)' },
+  { bg:'rgba(135,206,235,0.12)',  color:'#87ceeb',  border:'rgba(135,206,235,0.35)' },
+  { bg:'rgba(255,140,0,0.12)',    color:'#ff8c00',  border:'rgba(255,140,0,0.35)' },
+  { bg:'rgba(220,120,255,0.12)',  color:'#dc78ff',  border:'rgba(220,120,255,0.35)' },
+  { bg:'rgba(0,255,200,0.12)',    color:'#00ffc8',  border:'rgba(0,255,200,0.35)' },
+  { bg:'rgba(255,80,80,0.12)',    color:'#ff5050',  border:'rgba(255,80,80,0.35)' },
+  { bg:'rgba(180,255,100,0.12)',  color:'#b4ff64',  border:'rgba(180,255,100,0.35)' },
+  { bg:'rgba(255,200,100,0.12)',  color:'#ffc864',  border:'rgba(255,200,100,0.35)' },
+  { bg:'rgba(100,180,255,0.12)',  color:'#64b4ff',  border:'rgba(100,180,255,0.35)' },
+  { bg:'rgba(200,160,120,0.12)',  color:'#c8a078',  border:'rgba(200,160,120,0.35)' },
+];
+
+function getCustomStatuses() {
+  try { return JSON.parse(localStorage.getItem(CUSTOM_STATUS_KEY) || '[]'); } catch(e) { return []; }
+}
+
+function saveCustomStatus(label) {
+  const list = getCustomStatuses();
+  if (!list.find(x => x.label === label)) {
+    const palette = CUSTOM_PALETTE[list.length % CUSTOM_PALETTE.length];
+    list.push({ label, ...palette });
+    // Also register in STATUS_COLORS so badge renders correctly immediately
+    STATUS_COLORS[label] = palette;
+    localStorage.setItem(CUSTOM_STATUS_KEY, JSON.stringify(list));
+  }
+}
+
+function loadCustomStatusColors() {
+  getCustomStatuses().forEach(item => {
+    if (!STATUS_COLORS[item.label]) {
+      STATUS_COLORS[item.label] = { bg: item.bg, color: item.color, border: item.border };
+    }
+  });
+}
+
+function handleStatusChange(sno, selectEl) {
+  const val = selectEl.value;
+  if (val === '__ADD_CUSTOM__') {
+    const input = prompt(
+      '✏  Add Custom Live Stage / Status\n\n' +
+      'Enter your label (e.g. SITE SURVEY, MATERIAL TRANSIT, TESTING PHASE)\n' +
+      '(It will get a unique colour automatically)'
+    );
+    const trimmed = (input || '').trim().toUpperCase();
+    if (trimmed) {
+      saveCustomStatus(trimmed);
+      setProjectField(sno, 'proj_status', trimmed);
+    } else {
+      // Revert dropdown to current saved value
+      const proj = projects.find(p => p.sno === sno);
+      if (proj) selectEl.value = proj.proj_status || '';
+    }
+    return;
+  }
+  setProjectField(sno, 'proj_status', val);
+}
+
+function statusBadge(sno, currentStatus) {
+  loadCustomStatusColors();
+  const st = currentStatus || '';
+  const c = STATUS_COLORS[st] || { bg:'rgba(61,90,120,0.1)', color:'var(--text-muted)', border:'rgba(61,90,120,0.2)' };
+  const stdOpts = ['', ...PROJECT_STATUSES]
+    .map(s => `<option value="${s}" ${s===st?'selected':''}>${s||'— Set Status —'}</option>`)
+    .join('');
+  const customList = getCustomStatuses();
+  const customOpts = customList.length
+    ? `<optgroup label="── Custom Stages ──">${customList.map(x => `<option value="${x.label}" ${x.label===st?'selected':''}>${x.label}</option>`).join('')}</optgroup>`
+    : '';
+  const addOpt = `<option value="__ADD_CUSTOM__">✏  Add Custom Stage...</option>`;
+  return `<select class="status-select" style="background:${c.bg};color:${c.color};border-color:${c.border};font-weight:${st?'600':'400'}"
+    onchange="handleStatusChange(${sno},this)">${stdOpts}${customOpts}${addOpt}</select>`;
+}
+
+function doneToggle(sno, field, value) {
+  const v = value || 'na';
+  const states = { 'na': 'not-done', 'done': 'done', 'not-done': 'not-done' };
+  const labels = { 'na': '— N/A', 'done': '✓ Done', 'not-done': '✗ Pending' };
+  const cls = v==='done' ? 'done' : v==='not-done' ? 'not-done' : 'na';
+  const label = labels[v] || '— N/A';
+  return `<span class="done-toggle ${cls}" onclick="cycleDoneToggle(${sno},'${field}')">${label}</span>`;
+}
+
+function cycleDoneToggle(sno, field) {
+  const proj = projects.find(p=>p.sno===sno);
+  if(!proj) return;
+  const cycle = { 'na':'done', 'done':'not-done', 'not-done':'na' };
+  const cur = proj[field] || 'na';
+  proj[field] = cycle[cur] || 'done';
+  logEntry(proj.name, field, cur, proj[field]);
+  autoSave(); renderAll();
+}
+
+function setProjectField(sno, field, value) {
+  const proj = projects.find(p=>p.sno===sno);
+  if(!proj) return;
+  const old = proj[field] || '';
+  proj[field] = value;
+  if(old !== value) { logEntry(proj.name, field, old, value); autoSave(); }
+}
+
+// INITIAL DATA (from Excel)
+const INITIAL_PROJECTS = [
+  {sno:1,name:"TATA ISRO ICET Service",proj_number:"",pm:"Sourabh",so_no:"New S.O. Number",section:"CARRY_FORWARD",is_lvs:false,carry_po:57.54,carry_billed:0,carry_pending:57.54,po_value:58.58,billing_done:58.587354,pending_billing:-0.007354,apr_planned:58.58,apr_forsure:58.58,apr_estimated:0,apr_w1_p:58.58,apr_w1_a:0,apr_w2_p:0,apr_w2_a:58.587354,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:58.587354,may_planned:0,may_forsure:0,may_estimated:0,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:0,short_close:0},
+  {sno:4,name:"Indorama 4 projects Service",proj_number:"CR-24-25-90001",pm:"Sourabh",so_no:"3191200252",section:"CARRY_FORWARD",is_lvs:false,carry_po:73.31,carry_billed:0,carry_pending:73.31,po_value:22.76,billing_done:0,pending_billing:22.76,apr_planned:0,apr_forsure:0,apr_estimated:0,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:0,may_forsure:0,may_estimated:0,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:0,short_close:0},
+  {sno:11,name:"NHPC ASSAM service - BGS SOMA",proj_number:"CR-24-25-40009",pm:"Harshit",so_no:"3191101505",section:"CARRY_FORWARD",is_lvs:false,carry_po:32.948661,carry_billed:22.67,carry_pending:10.278661,po_value:8.32,billing_done:8.38726,pending_billing:-0.06726,apr_planned:0,apr_forsure:0,apr_estimated:0,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:8.32,may_forsure:0,may_estimated:8.32,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:8.38726,may_w4_p:0,may_w4_a:0,may_total:8.38726,short_close:0},
+  {sno:15,name:"Bechtel DMD",proj_number:"CR-24-25-40025",pm:"Harshit",so_no:"3191101646",section:"CARRY_FORWARD",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:27.13,billing_done:1.3992,pending_billing:25.7308,apr_planned:0,apr_forsure:0,apr_estimated:0,apr_w1_p:21.06,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:21.09,may_forsure:0,may_estimated:21.09,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:1.3992,may_w4_p:21.09,may_w4_a:0,may_total:1.3992,short_close:0},
+  {sno:16,name:"Bechtel NMD",proj_number:"CR-25-26-40014",pm:"Harshit",so_no:"3191101670",section:"CARRY_FORWARD",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:105.78,billing_done:0,pending_billing:105.78,apr_planned:29.84,apr_forsure:29.84,apr_estimated:0,apr_w1_p:29.84,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:29.84,may_forsure:29.84,may_estimated:0,may_w1_p:0,may_w1_a:0,may_w2_p:29.84,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:0,short_close:0},
+  {sno:21,name:"SKB :- BPCL Mumbai",proj_number:"CR-24-25-40018",pm:"Harsh Gaur",so_no:"3191101609",section:"CARRY_FORWARD",is_lvs:false,carry_po:177.49209,carry_billed:0,carry_pending:177.49209,po_value:48.18,billing_done:0,pending_billing:48.18,apr_planned:6.17,apr_forsure:6.17,apr_estimated:0,apr_w1_p:6.17,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:0,may_forsure:0,may_estimated:0,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:0,short_close:0},
+  {sno:22,name:"Central Command/Control Centre - Tirupati",proj_number:"CR-24-25-10015",pm:"Harsh Gaur",so_no:"3191101621",section:"CARRY_FORWARD",is_lvs:false,carry_po:74.3603,carry_billed:0,carry_pending:74.3603,po_value:0,billing_done:0,pending_billing:0,apr_planned:0,apr_forsure:0,apr_estimated:0,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:0,may_forsure:0,may_estimated:0,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:0,short_close:0},
+  {sno:24,name:"Arcelor Mittal Nippon Steel - AMNS HAZIRA",proj_number:"CR-24-25-40031",pm:"Harsh Gaur",so_no:"3191101769",section:"CARRY_FORWARD",is_lvs:false,carry_po:229,carry_billed:0,carry_pending:229,po_value:18.9,billing_done:0,pending_billing:18.9,apr_planned:0,apr_forsure:0,apr_estimated:0,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:0,may_forsure:0,may_estimated:0,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:0,short_close:0},
+  {sno:31,name:"Adani Power / Korba",proj_number:"CR-25-26-40012",pm:"Harshit",so_no:"3191101760",section:"FY25-26",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:4.69,billing_done:0,pending_billing:4.69,apr_planned:0.88,apr_forsure:0.88,apr_estimated:0,apr_w1_p:0.88,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:0.88,may_forsure:0,may_estimated:0.88,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0.88,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:0,short_close:0},
+  {sno:32,name:"Ultimate",proj_number:"CR-25-26-40026",pm:"Harsh Gaur",so_no:"3191101739",section:"FY25-26",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:10.68,billing_done:0,pending_billing:10.68,apr_planned:0,apr_forsure:0,apr_estimated:0,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:0,may_forsure:0,may_estimated:0,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:0,short_close:0},
+  {sno:33,name:"Laxmi Corporation (Supply+ Service)",proj_number:"CR-25-26-40013",pm:"Harsh Gaur",so_no:"3191101776",section:"FY25-26",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:2.09,billing_done:2.09166,pending_billing:2.09,apr_planned:2.1,apr_forsure:2.1,apr_estimated:0,apr_w1_p:2.1,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:2.09166,apr_w4_a:0,apr_total:2.09166,may_planned:0,may_forsure:0,may_estimated:0,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:0,short_close:0},
+  {sno:35,name:"Phenol Plant HPL - Haldia",proj_number:"CR-25-26-40019",pm:"Dipender",so_no:"3191101766",section:"FY25-26",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:9.53,billing_done:0,pending_billing:9.53,apr_planned:9.53,apr_forsure:4.14,apr_estimated:5.39,apr_w1_p:0,apr_w1_a:0,apr_w2_p:4.14,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:8.34,may_forsure:4.11,may_estimated:4.23,may_w1_p:0,may_w1_a:0,may_w2_p:4.11,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:4.23,may_w4_a:0,may_total:0,short_close:0},
+  {sno:37,name:"Honeywell LVS - HPL Supply + Service",proj_number:"CR-25-26-40020",pm:"Dipender",so_no:"3191101805",section:"FY25-26",is_lvs:true,carry_po:0,carry_billed:0,carry_pending:0,po_value:3.9,billing_done:0,pending_billing:3.9,apr_planned:3.9,apr_forsure:3.9,apr_estimated:0,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:3.9,apr_w4_a:0,apr_total:0,may_planned:3.9,may_forsure:3.9,may_estimated:0,may_w1_p:0,may_w1_a:0,may_w2_p:3.9,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:0,short_close:0},
+  {sno:38,name:"BPCL - Malkapur",proj_number:"CR-25-26-40016",pm:"Harshit",so_no:"3191101850",section:"FY25-26",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:1.85,billing_done:0,pending_billing:1.85,apr_planned:0,apr_forsure:0,apr_estimated:0,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:0,may_forsure:0,may_estimated:0,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:0,short_close:0},
+  {sno:44,name:"Epsilon",proj_number:"CR-25-26-40029",pm:"Harsh Gaur",so_no:"3191101894",section:"FY25-26",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:3.43,billing_done:3.92519,pending_billing:-0.49519,apr_planned:0,apr_forsure:0,apr_estimated:0,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:3.92519,apr_total:3.92519,may_planned:0,may_forsure:0,may_estimated:0,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:0,short_close:0},
+  {sno:45,name:"MM Exports (Supply + Service)",proj_number:"CR-25-26-60001",pm:"Dipender",so_no:"3191101893",section:"FY25-26",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:198.53,billing_done:0,pending_billing:198.53,apr_planned:198.53,apr_forsure:0,apr_estimated:198.53,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:107.43,may_forsure:0,may_estimated:107.43,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:107.43,may_w4_a:0,may_total:0,short_close:0},
+  {sno:46,name:"Mahan Thermal Power Plant Project",proj_number:"CR-25-26-40032",pm:"Harsh Gaur",so_no:"3191101945",section:"FY25-26",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:331.46,billing_done:61.432084,pending_billing:270.027916,apr_planned:50,apr_forsure:50,apr_estimated:0,apr_w1_p:50,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:60,may_forsure:60,may_estimated:0,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:61.432084,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:61.432084,short_close:0},
+  {sno:47,name:"Adani Enterprises Ltd",proj_number:"CR-25-26-40027",pm:"Dipender",so_no:"3191101909",section:"FY25-26",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:33.2,billing_done:0,pending_billing:33.2,apr_planned:33.2,apr_forsure:0,apr_estimated:33.2,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:33.21,may_forsure:0,may_estimated:33.21,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:33.21,may_w4_a:0,may_total:0,short_close:0},
+  {sno:48,name:"Auditorium - JPGS",proj_number:"CR-25-26-40025",pm:"Sunil",so_no:"3191101908",section:"FY25-26",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:228.08,billing_done:220.68159,pending_billing:7.39841,apr_planned:0,apr_forsure:0,apr_estimated:214.53,apr_w1_p:214.53,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:173.64298,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:173.64298,may_planned:54.44,may_forsure:54.44,may_estimated:0,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:47.03861,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:47.03861,short_close:0},
+  {sno:49,name:"Asian Paints (Polymer) Pvt Ltd.",proj_number:"CR-25-26-40031",pm:"Harsh Gaur",so_no:"3191101991",section:"FY25-26",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:35.22,billing_done:28.436768,pending_billing:6.783232,apr_planned:0,apr_forsure:0,apr_estimated:0,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:24,may_forsure:24,may_estimated:0,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:28.436768,may_total:28.436768,short_close:0},
+  {sno:50,name:"Jindal Paradip Port Limited",proj_number:"CR-25-26-40038",pm:"Harshit",so_no:"3191102009",section:"FY25-26",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:113.27,billing_done:58.526506,pending_billing:54.743494,apr_planned:40,apr_forsure:40,apr_estimated:0,apr_w1_p:40,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:55,may_forsure:55,may_estimated:0,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:80,may_w4_a:58.526506,may_total:58.526506,short_close:0},
+  {sno:51,name:"Jindal Steel Video Wall",proj_number:"CR-25-26-40033",pm:"Harsh Gaur",so_no:"3191100629/1325",section:"FY25-26",is_lvs:true,carry_po:0,carry_billed:0,carry_pending:0,po_value:116,billing_done:116.06976,pending_billing:-0.06976,apr_planned:0,apr_forsure:0,apr_estimated:0,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:116,may_forsure:0,may_estimated:116,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:116.06976,may_w4_p:0,may_w4_a:0,may_total:116.06976,short_close:0},
+  {sno:52,name:"JAM Infosystems Private Limited",proj_number:"CR-26-27-40004",pm:"Dipender",so_no:"3191102107",section:"FY25-26",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:159.52883,billing_done:0,pending_billing:159.52883,apr_planned:0,apr_forsure:0,apr_estimated:0,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:0,may_forsure:0,may_estimated:0,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:0,short_close:0},
+  {sno:53,name:"CVPPL Jammu (LOI)",proj_number:"",pm:"Harshit",so_no:"3191100629/1362",section:"FY25-26",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:281.28162,billing_done:0,pending_billing:281.28162,apr_planned:0,apr_forsure:0,apr_estimated:0,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:0,may_forsure:0,may_estimated:0,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:0,short_close:0},
+  {sno:54,name:"AMNS India Limited - SMP3",proj_number:"CR-25-26-10018",pm:"Harsh Gaur",so_no:"3191102027",section:"FY25-26",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:317.28303,billing_done:0,pending_billing:317.28303,apr_planned:0,apr_forsure:0,apr_estimated:0,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:0,may_forsure:0,may_estimated:0,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:0,short_close:0},
+  {sno:55,name:"Patel Engineering Ltd",proj_number:"CR-24-25-40023",pm:"Harshit",so_no:"3191102017",section:"FY25-26",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:3.01,billing_done:0,pending_billing:3.01,apr_planned:0,apr_forsure:0,apr_estimated:0,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:3.01,may_forsure:0,may_estimated:3.01,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:3.01,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:0,short_close:0},
+  {sno:56,name:"Jindal Steel & Power Limited",proj_number:"CR-25-26-40037",pm:"Harshit",so_no:"3191102060",section:"FY25-26",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:391.75914,billing_done:0,pending_billing:391.75914,apr_planned:0,apr_forsure:0,apr_estimated:0,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:25,may_forsure:16,may_estimated:25,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:0,short_close:0},
+  {sno:57,name:"AMNS LVS",proj_number:"CR-26-27-40002",pm:"Harsh Gaur",so_no:"3191102069",section:"FY25-26",is_lvs:true,carry_po:0,carry_billed:0,carry_pending:0,po_value:1027.475,billing_done:0,pending_billing:1027.475,apr_planned:0,apr_forsure:0,apr_estimated:0,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:0,may_forsure:0,may_estimated:0,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:0,short_close:0},
+  {sno:58,name:"PSIL",proj_number:"CR-25-26-40039",pm:"Dipender",so_no:"3191102036",section:"FY25-26",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:145.69,billing_done:117.16014,pending_billing:28.52986,apr_planned:0,apr_forsure:0,apr_estimated:0,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:143.64,may_forsure:143.64,may_estimated:0,may_w1_p:110,may_w1_a:117.16014,may_w2_p:23.64,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:10,may_w4_a:0,may_total:117.16014,short_close:0},
+  {sno:59,name:"ASIAN PAINTS LVS",proj_number:"CR-25-26-40043",pm:"Harsh Gaur",so_no:"3191102080",section:"FY25-26",is_lvs:true,carry_po:0,carry_billed:0,carry_pending:0,po_value:70,billing_done:51.5974,pending_billing:18.4026,apr_planned:51.5974,apr_forsure:0,apr_estimated:19,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:51.5974,apr_total:51.5974,may_planned:19,may_forsure:0,may_estimated:19,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:0,short_close:0},
+  {sno:60,name:"AMNS ICC",proj_number:"CR-25-26-40042",pm:"Harsh Gaur",so_no:"3191102065",section:"FY25-26",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:291.642,billing_done:0,pending_billing:291.642,apr_planned:0,apr_forsure:0,apr_estimated:0,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:0,may_forsure:0,may_estimated:0,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:0,short_close:0},
+  {sno:61,name:"GAIL USAR",proj_number:"CR-25-26-40028",pm:"Harsh Gaur",so_no:"3191101954",section:"FY25-26",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:3.7,billing_done:3.54094,pending_billing:0.15906,apr_planned:3.7,apr_forsure:3.7,apr_estimated:0,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:3.54094,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:3.54094,may_planned:3.5,may_forsure:3.5,may_estimated:0,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:0,short_close:0},
+  {sno:62,name:"SKB BPCL False Floor",proj_number:"CR-25-26-40041",pm:"Harsh Gaur",so_no:"",section:"FY25-26",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:0,billing_done:0,pending_billing:0,apr_planned:0,apr_forsure:0,apr_estimated:0,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:0,may_forsure:0,may_estimated:0,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:0,short_close:0},
+  {sno:63,name:"EPSILON ASHOKA",proj_number:"CR-25-26-40040",pm:"Harsh Gaur",so_no:"3191102028",section:"FY25-26",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:135.82458,billing_done:0,pending_billing:135.82458,apr_planned:0,apr_forsure:0,apr_estimated:0,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:0,may_forsure:0,may_estimated:0,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:0,short_close:0},
+  {sno:64,name:"Adani Chandarpur",proj_number:"CR-26-27-40003",pm:"Sunil",so_no:"3191100629",section:"FY26-27",is_lvs:false,carry_po:0,carry_billed:0,carry_pending:0,po_value:88.45966,billing_done:0,pending_billing:88.45966,apr_planned:0,apr_forsure:0,apr_estimated:0,apr_w1_p:0,apr_w1_a:0,apr_w2_p:0,apr_w2_a:0,apr_w3_p:0,apr_w3_a:0,apr_w4_p:0,apr_w4_a:0,apr_total:0,may_planned:0,may_forsure:0,may_estimated:0,may_w1_p:0,may_w1_a:0,may_w2_p:0,may_w2_a:0,may_w3_p:0,may_w3_a:0,may_w4_p:0,may_w4_a:0,may_total:0,short_close:0},
+];
+
+// ── STATE ──
+let projects = [];
+let entryLog = [];
+
+// ── LOAD / SAVE (localStorage) ──
+function loadData() {
+  try {
+    const saved = localStorage.getItem('onepws_dispatch_v4');
+    if (saved) {
+      const data = JSON.parse(saved);
+      projects = data.projects || JSON.parse(JSON.stringify(INITIAL_PROJECTS));
+      entryLog = data.log || [];
+    } else {
+      projects = JSON.parse(JSON.stringify(INITIAL_PROJECTS));
+      entryLog = [];
+    }
+  } catch(e) {
+    projects = JSON.parse(JSON.stringify(INITIAL_PROJECTS));
+    entryLog = [];
+  }
+  // MIGRATION: ensure LVS flags are always correct (fixes stale cached data)
+  const LVS_SNOS = [37, 51, 57, 59]; // Honeywell, Jindal Video Wall, AMNS LVS, Asian Paints LVS
+  projects.forEach(p => {
+    if (LVS_SNOS.includes(p.sno)) p.is_lvs = true;
+  });
+  // MIGRATION: ensure status fields exist
+  projects.forEach(p => {
+    if (p.proj_status === undefined) p.proj_status = '';
+    if (p.sc_done === undefined) p.sc_done = 'na';
+    if (p.amend_done === undefined) p.amend_done = 'na';
+  });
+  // MIGRATION: SURGICAL FIX — only CR-25-26-40020 (Honeywell sno:37) apr_total
+  // apr_w4_a is 0, so apr_total must be 0. billing_done/pending_billing NOT touched.
+  projects.forEach(p => {
+    if (p.sno === 37 && p.proj_number === 'CR-25-26-40020') {
+      const weeklySum = (p.apr_w1_a||0)+(p.apr_w2_a||0)+(p.apr_w3_a||0)+(p.apr_w4_a||0);
+      if (weeklySum === 0) p.apr_total = 0;
+    }
+  });
+  // MIGRATION: ensure all new month fields exist (jun–mar)
+  const NEW_MONTHS = ['jun','jul','aug','sep','oct','nov','dec','jan','feb','mar'];
+  projects.forEach(p => {
+    NEW_MONTHS.forEach(m => {
+      if (p[`${m}_planned`] === undefined) p[`${m}_planned`] = 0;
+      if (p[`${m}_forsure`] === undefined) p[`${m}_forsure`] = 0;
+      if (p[`${m}_estimated`] === undefined) p[`${m}_estimated`] = 0;
+      if (p[`${m}_w1_p`] === undefined) p[`${m}_w1_p`] = 0;
+      if (p[`${m}_w1_a`] === undefined) p[`${m}_w1_a`] = 0;
+      if (p[`${m}_w2_p`] === undefined) p[`${m}_w2_p`] = 0;
+      if (p[`${m}_w2_a`] === undefined) p[`${m}_w2_a`] = 0;
+      if (p[`${m}_w3_p`] === undefined) p[`${m}_w3_p`] = 0;
+      if (p[`${m}_w3_a`] === undefined) p[`${m}_w3_a`] = 0;
+      if (p[`${m}_w4_p`] === undefined) p[`${m}_w4_p`] = 0;
+      if (p[`${m}_w4_a`] === undefined) p[`${m}_w4_a`] = 0;
+      if (p[`${m}_total`] === undefined) p[`${m}_total`] = 0;
+    });
+  });
+}
+
+function saveAllData() {
+  try {
+    localStorage.setItem('onepws_dispatch_v4', JSON.stringify({ projects, log: entryLog, savedAt: new Date().toISOString() }));
+    const el = document.getElementById('saveStatus');
+    el.textContent = '✓ SAVED ' + new Date().toLocaleTimeString();
+    el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), 3000);
+  } catch(e) { alert('Save failed: ' + e.message); }
+}
+
+function autoSave() {
+  try { localStorage.setItem('onepws_dispatch_v4', JSON.stringify({ projects, log: entryLog, savedAt: new Date().toISOString() })); }
+  catch(e) {}
+}
+
+// ── HELPER FUNCTIONS ──
+const fmt = v => v === 0 ? '—' : v.toFixed(2);
+const fmtN = v => v.toFixed(2);
+
+function numCell(v, cls) {
+  if (v === 0 || v === null || v === undefined) return `<td class="td-num"><span class="num-zero">—</span></td>`;
+  const absV = Math.abs(v);
+  const sign = v < 0 ? '-' : '';
+  return `<td class="td-num ${cls||''}"><span class="${cls || (v < 0 ? 'num-red' : 'num-muted')}">${sign}${absV.toFixed(2)}</span></td>`;
+}
+
+function pmBadge(pm) {
+  const c = PM_COLORS[pm] || PM_COLORS['Harsh Gaur'];
+  return `<span class="pm-badge" style="background:${c.bg};color:${c.color}">${pm}</span>`;
+}
+
+function logEntry(projName, field, oldVal, newVal) {
+  const now = new Date();
+  entryLog.unshift({
+    time: now.toLocaleTimeString(),
+    date: now.toLocaleDateString(),
+    project: projName,
+    field,
+    from: oldVal,
+    to: newVal
+  });
+  if (entryLog.length > 500) entryLog = entryLog.slice(0, 500);
+  renderLog();
+}
+
+// ── MODAL STATE ──
+let _modalSno = null, _modalField = null, _modalLabel = null;
+let _textModalSno = null, _textModalField = null;
+
+// ── NUMERIC EDITABLE: opens modal ──
+function makeEditable(projId, field, currentVal, label, allowAdd) {
+  const displayVal = currentVal === 0 ? '—' : currentVal.toFixed(2);
+  const addBtn = allowAdd ? `<span class="editable-add" onclick="event.stopPropagation();openAddModal(${projId},'${field}','${label}')">+ADD</span>` : '';
+  return `<span style="display:flex;align-items:center;gap:3px;justify-content:flex-end">
+    <span class="editable" onclick="openModal(${projId},'${field}','${label}',${allowAdd||false})" title="Click to edit ${label}">
+      ${displayVal}
+    </span>${addBtn}</span>`;
+}
+
+// ── TEXT EDITABLE: for project name, CR, SO etc ──
+function makeEditableText(projId, field, currentVal, label) {
+  const display = currentVal || '—';
+  return `<span class="editable-text" onclick="openTextModal(${projId},'${field}','${label}','${(currentVal||'').replace(/'/g,"\'")}') " title="Click to edit: ${label}">${display}</span>`;
+}
+
+function openModal(sno, field, label, allowAdd) {
+  const proj = projects.find(p => p.sno === sno);
+  if (!proj) return;
+  _modalSno = sno; _modalField = field; _modalLabel = label;
+  const cur = proj[field] || 0;
+  document.getElementById('modalTitle').textContent = '✏ Edit: ' + label;
+  document.getElementById('modalCurrentVal').textContent = 'Current Value: ₹' + cur.toFixed(2) + ' L (PO: ₹' + (proj.po_value||0).toFixed(2) + ' L)';
+  document.getElementById('modalFieldLabel').textContent = 'Replace with New Value (₹ Lakhs)';
+  document.getElementById('modalInput').value = cur;
+  document.getElementById('modalHint').textContent = 'Project: ' + proj.name;
+  
+  const isAchieved = field.includes('_a') || field === 'billing_done' || field === 'apr_total' || field === 'may_total';
+  const addRow = document.getElementById('modalAddRow');
+  const addBtn = document.getElementById('modalAddBtn');
+  if (allowAdd || isAchieved) {
+    addRow.style.display = 'block';
+    addBtn.style.display = 'block';
+    document.getElementById('modalAddInput').value = '';
+  } else {
+    addRow.style.display = 'none';
+    addBtn.style.display = 'none';
+  }
+  document.getElementById('editModal').classList.add('open');
+  setTimeout(() => document.getElementById('modalInput').focus(), 100);
+}
+
+function openAddModal(sno, field, label) {
+  openModal(sno, field, label, true);
+  document.getElementById('modalInput').value = '';
+  setTimeout(() => document.getElementById('modalAddInput').focus(), 150);
+}
+
+
+// Safe text edit by sno — avoids inline string escaping issues
+function editTextBySno(sno, field, label) {
+  const proj = projects.find(p => p.sno === sno);
+  if (!proj) return;
+  openTextModal(sno, field, label, proj[field] || '');
+}
+
+function closeModal() {
+  document.getElementById('editModal').classList.remove('open');
+  _modalSno = null; _modalField = null;
+}
+
+function commitModal() {
+  if (_modalSno === null) return;
+  const proj = projects.find(p => p.sno === _modalSno);
+  if (!proj) return;
+  const newVal = parseFloat(document.getElementById('modalInput').value) || 0;
+  applyFieldChange(proj, _modalField, newVal, _modalLabel, false);
+  closeModal();
+}
+
+function commitModalAdd() {
+  if (_modalSno === null) return;
+  const proj = projects.find(p => p.sno === _modalSno);
+  if (!proj) return;
+  const addVal = parseFloat(document.getElementById('modalAddInput').value) || 0;
+  const cur = proj[_modalField] || 0;
+  applyFieldChange(proj, _modalField, cur + addVal, _modalLabel + ' (Added)', true);
+  closeModal();
+}
+
+function openTextModal(sno, field, label, currentVal) {
+  _textModalSno = sno; _textModalField = field;
+  document.getElementById('textModalLabel').textContent = label;
+  document.getElementById('textModalCurrent').textContent = currentVal || '(empty)';
+  document.getElementById('textModalInput').value = currentVal || '';
+  document.getElementById('textEditModal').classList.add('open');
+  setTimeout(() => document.getElementById('textModalInput').focus(), 100);
+}
+
+function closeTextModal() {
+  document.getElementById('textEditModal').classList.remove('open');
+  _textModalSno = null; _textModalField = null;
+}
+
+function commitTextModal() {
+  if (_textModalSno === null) return;
+  const proj = projects.find(p => p.sno === _textModalSno);
+  if (!proj) return;
+  const oldVal = proj[_textModalField] || '';
+  const newVal = document.getElementById('textModalInput').value.trim();
+  proj[_textModalField] = newVal;
+  logEntry(proj.name, _textModalField, oldVal, newVal);
+  autoSave();
+  closeTextModal();
+  renderAll();
+}
+
+// Close modal on overlay click
+document.addEventListener('click', e => {
+  if (e.target.id === 'editModal') closeModal();
+  if (e.target.id === 'textEditModal') closeTextModal();
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeModal(); closeTextModal(); }
+});
+
+function applyFieldChange(proj, field, newVal, label, isAdd) {
+  const oldVal = proj[field] || 0;
+  proj[field] = newVal;
+
+  // SMART BILLING RECALCULATION
+  const ALL_MONTH_KEYS = ['apr','may','jun','jul','aug','sep','oct','nov','dec','jan','feb','mar'];
+  if (['apr_w1_a','apr_w2_a','apr_w3_a','apr_w4_a','may_w1_a','may_w2_a','may_w3_a','may_w4_a',
+       'jun_w1_a','jun_w2_a','jun_w3_a','jun_w4_a','jul_w1_a','jul_w2_a','jul_w3_a','jul_w4_a',
+       'aug_w1_a','aug_w2_a','aug_w3_a','aug_w4_a','sep_w1_a','sep_w2_a','sep_w3_a','sep_w4_a',
+       'oct_w1_a','oct_w2_a','oct_w3_a','oct_w4_a','nov_w1_a','nov_w2_a','nov_w3_a','nov_w4_a',
+       'dec_w1_a','dec_w2_a','dec_w3_a','dec_w4_a','jan_w1_a','jan_w2_a','jan_w3_a','jan_w4_a',
+       'feb_w1_a','feb_w2_a','feb_w3_a','feb_w4_a','mar_w1_a','mar_w2_a','mar_w3_a','mar_w4_a'].includes(field)) {
+    const month = field.substring(0, field.indexOf('_w'));
+    proj[`${month}_total`] = (proj[`${month}_w1_a`]||0)+(proj[`${month}_w2_a`]||0)+(proj[`${month}_w3_a`]||0)+(proj[`${month}_w4_a`]||0);
+    proj.billing_done = ALL_MONTH_KEYS.reduce((s, m) => s + (proj[`${m}_total`]||0), 0);
+    proj.pending_billing = proj.po_value - proj.billing_done;
+  }
+
+  if (ALL_MONTH_KEYS.map(m=>`${m}_total`).includes(field)) {
+    proj.billing_done = ALL_MONTH_KEYS.reduce((s, m) => s + (proj[`${m}_total`]||0), 0);
+    proj.pending_billing = proj.po_value - proj.billing_done;
+  }
+
+  if (field === 'billing_done') {
+    proj.pending_billing = proj.po_value - proj.billing_done;
+  }
+
+  if (field === 'po_value') {
+    proj.pending_billing = proj.po_value - proj.billing_done;
+    proj.carry_pending = proj.carry_po - proj.carry_billed;
+  }
+
+  // Short close is MANUAL ONLY — user updates it project-wise
+  // Do NOT auto-calculate short_close from pending_billing
+
+  if (newVal !== oldVal) {
+    logEntry(proj.name, label + (isAdd ? ' (+' + (newVal-oldVal).toFixed(2) + 'L)' : ''), oldVal.toFixed(2), newVal.toFixed(2));
+    autoSave();
+  }
+  renderAll();
+}
+
+// ── EDIT S.NO (with series-wise update option) ──
+function editSno(currentSno) {
+  const proj = projects.find(p => p.sno === currentSno);
+  if (!proj) return;
+  const newSnoStr = prompt(
+    `✏ Edit S.No — "${proj.name.substring(0,40)}"\n` +
+    `Current S.No: ${currentSno}\n\n` +
+    `Enter new S.No:\n` +
+    `(Tip: To shift all higher S.No.s too, confirm "Series Update" in next step)`,
+    currentSno
+  );
+  if (newSnoStr === null || newSnoStr.trim() === '') return;
+  const parsed = parseInt(newSnoStr.trim());
+  if (isNaN(parsed) || parsed <= 0) { alert('Invalid S.No. Please enter a positive number.'); return; }
+
+  const diff = parsed - currentSno;
+
+  // Ask for series-wise update if S.No is changing
+  if (diff !== 0) {
+    const higherSnos = projects.filter(p => p.sno > currentSno && p.sno !== currentSno).map(p => p.sno).sort((a,b)=>a-b);
+    if (higherSnos.length > 0 && diff !== 0) {
+      const doSeries = confirm(
+        `Series-wise Update?\n\n` +
+        `Change S.No ${currentSno} → ${parsed} (diff: ${diff>0?'+':''}${diff})\n\n` +
+        `Also shift ${higherSnos.length} higher S.No.s by ${diff>0?'+':''}${diff}?\n` +
+        `(e.g. ${higherSnos[0]} → ${higherSnos[0]+diff}, ${higherSnos[Math.min(1,higherSnos.length-1)]} → ${higherSnos[Math.min(1,higherSnos.length-1)]+diff}...)\n\n` +
+        `OK = Yes (series-wise update)\nCancel = No (only this S.No)`
+      );
+      if (doSeries) {
+        // Update all higher S.No.s first (to avoid collision), then update this one
+        const sorted = diff > 0
+          ? projects.filter(p => p.sno > currentSno).sort((a,b) => b.sno - a.sno)
+          : projects.filter(p => p.sno > currentSno).sort((a,b) => a.sno - b.sno);
+        sorted.forEach(p => { p.sno = p.sno + diff; });
+        proj.sno = parsed;
+        logEntry(proj.name, 'S.No Series Update', currentSno, `${parsed} (+${diff} applied to ${higherSnos.length} projects)`);
+        autoSave();
+        renderAll();
+        return;
+      }
+    }
+  }
+
+  if (projects.some(p => p.sno === parsed && p.sno !== currentSno)) {
+    if (!confirm(`S.No ${parsed} already exists. Still use this number?`)) return;
+  }
+  logEntry(proj.name, 'S.No Changed', currentSno, parsed);
+  proj.sno = parsed;
+  autoSave();
+  renderAll();
+}
+
+
+
+// Legacy inline edit kept for backward compat (not used in new UI)
+function startEdit(el, projId, field, label) {
+  openModal(parseInt(projId), field, label, false);
+}
+function updateKPIs() {
+  const activeProjects = projects.filter(p => p.name && p.name.trim());
+  const totalPO = activeProjects.reduce((s, p) => s + (p.po_value || 0), 0);
+  const totalDone = activeProjects.reduce((s, p) => s + (p.billing_done || 0), 0);
+  const totalPending = activeProjects.reduce((s, p) => s + Math.max(0, p.pending_billing || 0), 0);
+  const overBudget = activeProjects.filter(p => p.billing_done > p.po_value && p.po_value > 0).length;
+  const totalShortClose = activeProjects.reduce((s, p) => s + (p.short_close || 0), 0);
+  const pct = totalPO > 0 ? (totalDone / totalPO * 100).toFixed(1) : 0;
+
+  document.getElementById('kpi-po').textContent = totalPO.toFixed(2) + ' L';
+  document.getElementById('kpi-done').textContent = totalDone.toFixed(2) + ' L';
+  document.getElementById('kpi-pending').textContent = totalPending.toFixed(2) + ' L';
+  document.getElementById('kpi-shortclose').textContent = totalShortClose.toFixed(2) + ' L';
+  document.getElementById('kpi-overbudget').textContent = overBudget;
+  document.getElementById('kpi-projects').textContent = activeProjects.length;
+  document.getElementById('kpi-pct').textContent = pct + '%';
+}
+
+function renderMainTable() {
+  const search = (document.getElementById('searchAll')?.value || '').toLowerCase();
+  const filterPM = document.getElementById('filterPM')?.value || '';
+  const filterSec = document.getElementById('filterSection')?.value || '';
+  const filterStatus = document.getElementById('filterStatus')?.value || '';
+
+  let filtered = projects.filter(p => {
+    if (!p.name || !p.name.trim()) return false;
+    if (search && !p.name.toLowerCase().includes(search) && !p.pm.toLowerCase().includes(search) && !p.so_no.toLowerCase().includes(search)) return false;
+    if (filterPM && p.pm !== filterPM) return false;
+    if (filterSec && p.section !== filterSec) return false;
+    if (filterStatus === 'over' && !(p.billing_done > p.po_value && p.po_value > 0)) return false;
+    if (filterStatus === 'shortclose' && !(p.short_close > 0)) return false;
+    if (filterStatus === 'pending' && !(p.pending_billing > 0)) return false;
+    if (filterStatus === 'lvs' && !p.is_lvs) return false;
+    if (filterStatus && !['over','shortclose','pending','lvs'].includes(filterStatus) && (p.proj_status||'') !== filterStatus) return false;
+    return true;
+  });
+
+  const tbody = document.getElementById('mainTbody');
+  let html = '';
+  let lastSection = '';
+
+  let totals = { po: 0, done: 0, pending: 0, sc: 0 };
+
+  const sectionLabels = { CARRY_FORWARD: 'CARRY FORWARD (FY 24-25)', 'FY25-26': 'FY 2025-26', 'FY26-27': 'FY 2026-27' };
+  const sectionClasses = { CARRY_FORWARD: 'carry', 'FY25-26': 'fy26', 'FY26-27': 'fy27' };
+
+  filtered.forEach(p => {
+    if (p.section !== lastSection) {
+      lastSection = p.section;
+      html += `<tr class="section-row ${sectionClasses[p.section]||'fy27'}"><td colspan="16">◆ ${sectionLabels[p.section]||p.section}</td></tr>`;
+    }
+
+    const isOver = p.billing_done > p.po_value && p.po_value > 0;
+    const pending = p.pending_billing;
+    const shortClose = p.short_close || 0;
+
+    totals.po += p.po_value || 0;
+    totals.done += p.billing_done || 0;
+    totals.pending += Math.max(0, pending);
+    totals.sc += shortClose;
+
+    const overBudgetDisplay = isOver
+      ? `<span class="over-budget-badge">▲ ${(p.billing_done - p.po_value).toFixed(2)}L</span>`
+      : `<span class="num-zero">—</span>`;
+
+    html += `<tr>
+      <td class="td-sno"><span class="editable-sno" onclick="editSno(${p.sno})" title="Click to edit S.No">${p.sno}</span></td>
+      <td class="td-project" style="min-width:190px">
+        <div class="project-name">${makeEditableText(p.sno,'name',p.name,'Project Name')}${p.is_lvs ? '<span class="lvs-tag">LVS</span>' : ''}</div>
+      </td>
+      <td class="td-pm">${makeEditableText(p.sno,'pm',p.pm,'PM Name')}</td>
+      <td style="padding:5px 8px;min-width:130px;vertical-align:middle">
+        <div style="font-size:10px">${makeEditableText(p.sno,'so_no',p.so_no,'S.O. Number')}</div>
+        ${p.proj_number ? `<div style="margin-top:3px"><span style="background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.2);border-radius:3px;padding:1px 5px;font-family:'JetBrains Mono',monospace;font-size:8px;color:var(--accent-cyan);display:inline-block">${p.proj_number}</span></div>` : ''}
+      </td>
+      <td class="td-num sep-left">${makeEditable(p.sno, 'carry_po', p.carry_po, 'CF PO Value', false)}</td>
+      <td class="td-num">${makeEditable(p.sno, 'carry_billed', p.carry_billed, 'CF Billed', false)}</td>
+      <td class="td-num"><span class="${p.carry_pending > 0 ? 'num-amber' : 'num-zero'}">${p.carry_pending !== 0 ? p.carry_pending.toFixed(2) : '—'}</span></td>
+      <td class="td-num sep-left">${makeEditable(p.sno, 'po_value', p.po_value, 'P.O. Value', false)}</td>
+      <td class="td-num">${makeEditable(p.sno, 'billing_done', p.billing_done, 'Billing Done', true)}</td>
+      <td class="td-num"><span class="${pending < 0 ? 'num-red' : pending > 0 ? 'num-amber' : 'num-zero'}">${pending !== 0 ? pending.toFixed(2) : '—'}</span></td>
+      <td class="sep-left" style="padding:4px 6px;text-align:center;min-width:115px">${statusBadge(p.sno, p.proj_status)}</td>
+      <td style="padding:4px 6px;min-width:90px">${makeEditable(p.sno, 'short_close', shortClose, 'Short Close Amt', false)}</td>
+      <td style="padding:4px 6px;text-align:center;min-width:72px">${doneToggle(p.sno,'sc_done',p.sc_done)}</td>
+      <td style="padding:4px 6px;text-align:center;min-width:90px">${overBudgetDisplay}</td>
+      <td style="padding:4px 6px;text-align:center;min-width:72px">${doneToggle(p.sno,'amend_done',p.amend_done)}</td>
+      <td class="td-num" style="min-width:110px">${makeEditable(p.sno, 'billing_done', p.billing_done, 'Update Billing Done', true)}</td>
+    </tr>`;
+  });
+
+  // TOTAL ROW
+  html += `<tr class="total-row">
+    <td colspan="4" style="text-align:left;padding-left:14px">◆ GRAND TOTAL (${filtered.length} Projects)</td>
+    <td class="td-num sep-left">—</td><td class="td-num">—</td><td class="td-num">—</td>
+    <td class="td-num sep-left" style="color:var(--accent-cyan)">${totals.po.toFixed(2)}</td>
+    <td class="td-num" style="color:var(--accent-green)">${totals.done.toFixed(2)}</td>
+    <td class="td-num" style="color:var(--accent-amber)">${totals.pending.toFixed(2)}</td>
+    <td colspan="5" style="text-align:center;color:var(--text-muted);font-size:10px">—</td>
+    <td class="td-num" style="color:var(--accent-green)">${totals.done.toFixed(2)}</td>
+  </tr>`;
+
+  tbody.innerHTML = html;
+  document.getElementById('rowCount').textContent = `Showing ${filtered.length} of ${projects.length} projects`;
+}
+
+// Months where all numeric fields start empty and are fully user-editable (Jun 2026 onwards)
+const FUTURE_MONTHS = ['jun','jul','aug','sep','oct','nov','dec','jan','feb','mar'];
+
+function renderWeeklyTable(tableId, tbodyId, month, countId) {
+  const searchId = `search${month.charAt(0).toUpperCase()+month.slice(1)}`;
+  const pmId = `filter${month.charAt(0).toUpperCase()+month.slice(1)}PM`;
+  const search = (document.getElementById(searchId)?.value || '').toLowerCase();
+  const filterPM = document.getElementById(pmId)?.value || '';
+  const isFuture = FUTURE_MONTHS.includes(month);
+
+  let filtered = projects.filter(p => {
+    if (!p.name || !p.name.trim()) return false;
+    if (search && !p.name.toLowerCase().includes(search) && !(p.proj_number||'').toLowerCase().includes(search)) return false;
+    if (filterPM && p.pm !== filterPM) return false;
+    return true;
+  });
+
+  const tbody = document.getElementById(tbodyId);
+  let html = '';
+  let lastSection = '';
+  const sectionLabels = { CARRY_FORWARD: 'CARRY FORWARD', 'FY25-26': 'FY 2025-26', 'FY26-27': 'FY 2026-27' };
+  const sectionClasses = { CARRY_FORWARD: 'carry', 'FY25-26': 'fy26', 'FY26-27': 'fy27' };
+  let totals = { planned:0, forsure:0, estimated:0, w1p:0, w1a:0, w2p:0, w2a:0, w3p:0, w3a:0, w4p:0, w4a:0, total:0 };
+
+  filtered.forEach(p => {
+    if (p.section !== lastSection) {
+      lastSection = p.section;
+      html += `<tr class="section-row ${sectionClasses[p.section]||'fy27'}"><td colspan="16">◆ ${sectionLabels[p.section]||p.section}</td></tr>`;
+    }
+
+    const mp = month;
+    const planned   = p[`${mp}_planned`]||0;
+    const forsure   = p[`${mp}_forsure`]||0;
+    const estimated = p[`${mp}_estimated`]||0;
+    const w1p = p[`${mp}_w1_p`]||0, w1a = p[`${mp}_w1_a`]||0;
+    const w2p = p[`${mp}_w2_p`]||0, w2a = p[`${mp}_w2_a`]||0;
+    const w3p = p[`${mp}_w3_p`]||0, w3a = p[`${mp}_w3_a`]||0;
+    const w4p = p[`${mp}_w4_p`]||0, w4a = p[`${mp}_w4_a`]||0;
+    const total = p[`${mp}_total`]||0;
+
+    totals.planned+=planned; totals.forsure+=forsure; totals.estimated+=estimated;
+    totals.w1p+=w1p; totals.w1a+=w1a; totals.w2p+=w2p; totals.w2a+=w2a;
+    totals.w3p+=w3p; totals.w3a+=w3a; totals.w4p+=w4p; totals.w4a+=w4a; totals.total+=total;
+
+    const MU = mp.toUpperCase();
+
+    if (isFuture) {
+      // ── FUTURE MONTHS (Jun–Mar): only S.No, Project Name, CR No. shown; all numeric fields are editable ──
+      html += `<tr>
+        <td class="td-sno"><span class="editable-sno" onclick="editSno(${p.sno})" title="Click to edit S.No">${p.sno}</span></td>
+        <td class="td-project"><div class="project-name" style="font-size:12px;font-weight:500">${p.name}${p.is_lvs?'<span class="lvs-tag">LVS</span>':''}</div></td>
+        <td class="td-pm">${pmBadge(p.pm)}</td>
+        <td class="td-sono" style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--accent-cyan)">${p.proj_number?`<span style="background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.2);border-radius:3px;padding:2px 5px;display:inline-block">${p.proj_number}</span>`:'<span style="color:var(--text-muted)">—</span>'}</td>
+        <td class="td-num sep-left">${makeEditable(p.sno, `${mp}_planned`, planned, `${MU} Planned`, false)}</td>
+        <td class="td-num">${makeEditable(p.sno, `${mp}_forsure`, forsure, `${MU} For Sure`, false)}</td>
+        <td class="td-num">${makeEditable(p.sno, `${mp}_estimated`, estimated, `${MU} Estimated`, false)}</td>
+        <td class="td-planned sep-left">${makeEditable(p.sno, `${mp}_w1_p`, w1p, `${MU} W1 Planned`, false)}</td>
+        <td class="td-achieved">${makeEditable(p.sno, `${mp}_w1_a`, w1a, `${MU} W1 Achieved`, true)}</td>
+        <td class="td-planned sep-left">${makeEditable(p.sno, `${mp}_w2_p`, w2p, `${MU} W2 Planned`, false)}</td>
+        <td class="td-achieved">${makeEditable(p.sno, `${mp}_w2_a`, w2a, `${MU} W2 Achieved`, true)}</td>
+        <td class="td-planned sep-left">${makeEditable(p.sno, `${mp}_w3_p`, w3p, `${MU} W3 Planned`, false)}</td>
+        <td class="td-achieved">${makeEditable(p.sno, `${mp}_w3_a`, w3a, `${MU} W3 Achieved`, true)}</td>
+        <td class="td-planned sep-left">${makeEditable(p.sno, `${mp}_w4_p`, w4p, `${MU} W4 Planned`, false)}</td>
+        <td class="td-achieved">${makeEditable(p.sno, `${mp}_w4_a`, w4a, `${MU} W4 Achieved`, true)}</td>
+        <td class="td-num sep-left"><span class="${total > 0 ? 'num-green' : 'num-zero'}">${total > 0 ? total.toFixed(2) : '—'}</span></td>
+      </tr>`;
+    } else {
+      // ── APR / MAY: original fully editable layout ──
+      html += `<tr>
+        <td class="td-sno">${p.sno}</td>
+        <td class="td-project"><div class="project-name">${makeEditableText(p.sno,'name',p.name,'Project Name')}${p.is_lvs?'<span class="lvs-tag">LVS</span>':''}</div></td>
+        <td class="td-pm">${makeEditableText(p.sno,'pm',p.pm,'PM Name')}</td>
+        <td class="td-sono" style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--accent-cyan)">${p.proj_number?`<span style="background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.2);border-radius:3px;padding:1px 5px">${p.proj_number}</span>`:'<span style="color:var(--text-muted)">—</span>'}</td>
+        <td class="td-num sep-left">${makeEditable(p.sno, `${mp}_planned`, planned, `${MU} Planned`, false)}</td>
+        <td class="td-num">${makeEditable(p.sno, `${mp}_forsure`, forsure, `${MU} For Sure`, false)}</td>
+        <td class="td-num">${makeEditable(p.sno, `${mp}_estimated`, estimated, `${MU} Estimated`, false)}</td>
+        <td class="td-planned sep-left">${makeEditable(p.sno, `${mp}_w1_p`, w1p, `${MU} W1 Planned`, false)}</td>
+        <td class="td-achieved">${makeEditable(p.sno, `${mp}_w1_a`, w1a, `${MU} W1 Achieved`, true)}</td>
+        <td class="td-planned sep-left">${makeEditable(p.sno, `${mp}_w2_p`, w2p, `${MU} W2 Planned`, false)}</td>
+        <td class="td-achieved">${makeEditable(p.sno, `${mp}_w2_a`, w2a, `${MU} W2 Achieved`, true)}</td>
+        <td class="td-planned sep-left">${makeEditable(p.sno, `${mp}_w3_p`, w3p, `${MU} W3 Planned`, false)}</td>
+        <td class="td-achieved">${makeEditable(p.sno, `${mp}_w3_a`, w3a, `${MU} W3 Achieved`, true)}</td>
+        <td class="td-planned sep-left">${makeEditable(p.sno, `${mp}_w4_p`, w4p, `${MU} W4 Planned`, false)}</td>
+        <td class="td-achieved">${makeEditable(p.sno, `${mp}_w4_a`, w4a, `${MU} W4 Achieved`, true)}</td>
+        <td class="td-num sep-left"><span class="${total > 0 ? 'num-green' : 'num-zero'}">${total > 0 ? total.toFixed(2) : '—'}</span></td>
+      </tr>`;
+    }
+  });
+
+  html += `<tr class="total-row">
+    <td colspan="4" style="text-align:left;padding-left:14px">◆ TOTAL (${filtered.length} projects)</td>
+    <td class="td-num sep-left" style="color:var(--accent-cyan)">${totals.planned > 0 ? totals.planned.toFixed(2) : '—'}</td>
+    <td class="td-num" style="color:var(--accent-teal)">${totals.forsure > 0 ? totals.forsure.toFixed(2) : '—'}</td>
+    <td class="td-num" style="color:var(--text-muted)">${totals.estimated > 0 ? totals.estimated.toFixed(2) : '—'}</td>
+    <td class="td-planned sep-left">${totals.w1p > 0 ? totals.w1p.toFixed(2) : '—'}</td>
+    <td class="td-num" style="color:var(--accent-green)">${totals.w1a > 0 ? totals.w1a.toFixed(2) : '—'}</td>
+    <td class="td-planned sep-left">${totals.w2p > 0 ? totals.w2p.toFixed(2) : '—'}</td>
+    <td class="td-num" style="color:var(--accent-green)">${totals.w2a > 0 ? totals.w2a.toFixed(2) : '—'}</td>
+    <td class="td-planned sep-left">${totals.w3p > 0 ? totals.w3p.toFixed(2) : '—'}</td>
+    <td class="td-num" style="color:var(--accent-green)">${totals.w3a > 0 ? totals.w3a.toFixed(2) : '—'}</td>
+    <td class="td-planned sep-left">${totals.w4p > 0 ? totals.w4p.toFixed(2) : '—'}</td>
+    <td class="td-num" style="color:var(--accent-green)">${totals.w4a > 0 ? totals.w4a.toFixed(2) : '—'}</td>
+    <td class="td-num sep-left" style="color:var(--accent-green)">${totals.total > 0 ? totals.total.toFixed(2) : '—'}</td>
+  </tr>`;
+
+  tbody.innerHTML = html;
+  if (countId) document.getElementById(countId).textContent = `${filtered.length} projects`;
+}
+
+function renderLVSTable() {
+  const LVS_MONTHS = [
+    { key: 'apr', label: 'APR 2026' }, { key: 'may', label: 'MAY 2026' },
+    { key: 'jun', label: 'JUN 2026' }, { key: 'jul', label: 'JUL 2026' },
+    { key: 'aug', label: 'AUG 2026' }, { key: 'sep', label: 'SEP 2026' },
+    { key: 'oct', label: 'OCT 2026' }, { key: 'nov', label: 'NOV 2026' },
+    { key: 'dec', label: 'DEC 2026' }, { key: 'jan', label: 'JAN 2027' },
+    { key: 'feb', label: 'FEB 2027' }, { key: 'mar', label: 'MAR 2027' },
+  ];
+
+  const lvsProjs = projects.filter(p => p.is_lvs);
+  const tbody = document.getElementById('lvsTbody');
+  let html = '';
+
+  let totPO = 0, totDone = 0, totPending = 0;
+  const monthTotPlan = {}, monthTotAch = {};
+  LVS_MONTHS.forEach(m => { monthTotPlan[m.key] = 0; monthTotAch[m.key] = 0; });
+
+  lvsProjs.forEach(p => {
+    const billingPct = p.po_value > 0 ? (p.billing_done / p.po_value * 100).toFixed(1) : 0;
+    const isOver = p.billing_done > p.po_value && p.po_value > 0;
+    totPO += p.po_value||0;
+    totDone += p.billing_done||0;
+    totPending += Math.max(0, p.pending_billing||0);
+
+    const monthCells = LVS_MONTHS.map(m => {
+      const plan = p[`${m.key}_planned`]||0;
+      const ach  = p[`${m.key}_total`]||0;
+      monthTotPlan[m.key] += plan;
+      monthTotAch[m.key]  += ach;
+      return `<td class="td-num sep-left">${makeEditable(p.sno, `${m.key}_planned`, plan, `${m.label} Plan`, false)}</td>
+              <td class="td-num">${makeEditable(p.sno, `${m.key}_total`, ach, `${m.label} Achieved`, true)}</td>`;
+    }).join('');
+
+    html += `<tr>
+      <td class="td-sno" style="font-size:12px;font-weight:600;color:var(--accent-gold)">${p.sno}</td>
+      <td class="td-project" style="min-width:200px;padding:8px 10px">
+        <div style="font-weight:600;color:var(--text-primary);font-size:11px;line-height:1.4">${p.name}</div>
+        <span class="lvs-tag">LVS</span>
+      </td>
+      <td class="td-pm" style="padding:6px 8px">${pmBadge(p.pm)}</td>
+      <td class="td-sono" style="min-width:100px;font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text-secondary)">${p.proj_number||'—'}</td>
+      <td class="td-sono" style="min-width:100px;font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text-secondary)">${p.so_no||'—'}</td>
+      <td class="td-num sep-left">${makeEditable(p.sno,'po_value',p.po_value,'PO Value',false)}</td>
+      <td class="td-num">
+        <span class="${p.billing_done > 0 ? 'num-green' : 'num-zero'}" style="font-size:11px;font-weight:600">${p.billing_done > 0 ? p.billing_done.toFixed(2) : '—'}</span>
+        ${isOver ? '<span class="over-budget-badge" style="display:block;margin-top:2px;text-align:center;font-size:8px">⚠ OVER</span>' : ''}
+      </td>
+      <td class="td-num">
+        <span class="${p.pending_billing < 0 ? 'num-red' : p.pending_billing > 0 ? 'num-amber' : 'num-zero'}">${p.pending_billing !== 0 ? p.pending_billing.toFixed(2) : '—'}</span>
+      </td>
+      ${monthCells}
+      <td class="td-num sep-left" style="min-width:75px;padding:6px 8px">
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">
+          <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:${parseFloat(billingPct)>=100?'var(--accent-green)':parseFloat(billingPct)>=60?'var(--accent-teal)':'var(--accent-amber)'};font-weight:700">${billingPct}%</span>
+          <div style="width:55px;height:4px;background:var(--border);border-radius:3px;overflow:hidden">
+            <div style="height:100%;width:${Math.min(parseFloat(billingPct),100)}%;background:${parseFloat(billingPct)>=100?'var(--accent-green)':parseFloat(billingPct)>=60?'var(--accent-teal)':'var(--accent-amber)'};border-radius:3px"></div>
+          </div>
+        </div>
+      </td>
+    </tr>`;
+  });
+
+  const lvsTotPct = totPO > 0 ? (totDone/totPO*100).toFixed(1) : 0;
+  const monthTotalCells = LVS_MONTHS.map(m =>
+    `<td class="td-num sep-left" style="color:var(--text-muted);font-size:10px">${monthTotPlan[m.key] > 0 ? monthTotPlan[m.key].toFixed(2) : '—'}</td>
+     <td class="td-num" style="color:var(--accent-green);font-size:10px">${monthTotAch[m.key] > 0 ? monthTotAch[m.key].toFixed(2) : '—'}</td>`
+  ).join('');
+
+  html += `<tr class="total-row">
+    <td colspan="5" style="text-align:left;padding-left:14px">◆ LVS TOTAL (${lvsProjs.length} Projects)</td>
+    <td class="td-num sep-left" style="color:var(--accent-gold)">${totPO.toFixed(2)}</td>
+    <td class="td-num" style="color:var(--accent-green)">${totDone.toFixed(2)}</td>
+    <td class="td-num" style="color:var(--accent-amber)">${totPending.toFixed(2)}</td>
+    ${monthTotalCells}
+    <td class="td-num sep-left" style="color:var(--accent-cyan);font-weight:700">${lvsTotPct}%</td>
+  </tr>`;
+
+  tbody.innerHTML = html;
+
+  const lvsPct = totPO > 0 ? (totDone/totPO*100).toFixed(1) : 0;
+  document.getElementById('lvsSummary').innerHTML = `
+    <div class="lvs-kpi"><div class="lvs-kpi-label">LVS Total PO</div><div class="lvs-kpi-value">${totPO.toFixed(2)}</div><div class="lvs-kpi-sub">₹ Lakhs · ${lvsProjs.length} Projects</div></div>
+    <div class="lvs-kpi"><div class="lvs-kpi-label">LVS Billing Done</div><div class="lvs-kpi-value" style="color:var(--accent-green)">${totDone.toFixed(2)}</div><div class="lvs-kpi-sub">₹ Lakhs · ${lvsPct}% of PO</div></div>
+    <div class="lvs-kpi"><div class="lvs-kpi-label">LVS Pending</div><div class="lvs-kpi-value" style="color:var(--accent-amber)">${totPending.toFixed(2)}</div><div class="lvs-kpi-sub">₹ Lakhs · Remaining</div></div>
+    <div class="lvs-kpi"><div class="lvs-kpi-label">LVS Projects (${lvsProjs.length})</div>
+      <div style="margin-top:4px">${lvsProjs.map(p=>`<div style="font-size:9px;font-family:'JetBrains Mono',monospace;color:var(--accent-gold);padding:2px 0;border-bottom:1px solid rgba(255,215,0,0.08)">#${p.sno} ${p.name}</div>`).join('')}</div>
+    </div>`;
+}
+
+
+
+function renderPMPerformance() {
+  const pms = ['Sourabh', 'Harshit', 'Harsh Gaur', 'Dipender', 'Sunil'];
+
+  // All 12 months of FY 2026-27
+  const ALL_MONTHS = [
+    { key: 'apr', label: 'APR 2026', monthNum: 4,  year: 2026 },
+    { key: 'may', label: 'MAY 2026', monthNum: 5,  year: 2026 },
+    { key: 'jun', label: 'JUN 2026', monthNum: 6,  year: 2026 },
+    { key: 'jul', label: 'JUL 2026', monthNum: 7,  year: 2026 },
+    { key: 'aug', label: 'AUG 2026', monthNum: 8,  year: 2026 },
+    { key: 'sep', label: 'SEP 2026', monthNum: 9,  year: 2026 },
+    { key: 'oct', label: 'OCT 2026', monthNum: 10, year: 2026 },
+    { key: 'nov', label: 'NOV 2026', monthNum: 11, year: 2026 },
+    { key: 'dec', label: 'DEC 2026', monthNum: 12, year: 2026 },
+    { key: 'jan', label: 'JAN 2027', monthNum: 1,  year: 2027 },
+    { key: 'feb', label: 'FEB 2027', monthNum: 2,  year: 2027 },
+    { key: 'mar', label: 'MAR 2027', monthNum: 3,  year: 2027 },
+  ];
+
+  // Show month in PM Performance if:
+  // 1) Current month or past month (real data may exist)
+  // 2) OR has any planned/achieved data entered
+  const now = new Date();
+  const nowYear = now.getFullYear();
+  const nowMonth = now.getMonth() + 1; // 1-12
+
+  const visibleMonths = ALL_MONTHS.filter(m => {
+    const isPastOrCurrent = (m.year < nowYear) || (m.year === nowYear && m.monthNum <= nowMonth);
+    const hasData = projects.some(p => (p[`${m.key}_planned`]||0) > 0 || (p[`${m.key}_total`]||0) > 0 || (p[`${m.key}_forsure`]||0) > 0);
+    return isPastOrCurrent || hasData;
+  }).reverse(); // Current month first, then previous months below
+
+  function pmColor(pm) { return PM_COLORS[pm] || { bg: 'rgba(100,150,200,0.15)', color: '#6496c8' }; }
+  function pctColor(pct) { return pct >= 100 ? 'var(--accent-green)' : pct >= 70 ? 'var(--accent-teal)' : 'var(--accent-amber)'; }
+  function progBar(pct) {
+    const c = pctColor(pct);
+    return `<div class="prog-bar-wrap"><div class="prog-bar"><div class="prog-fill" style="width:${Math.min(pct,100)}%;background:${c}"></div></div><span class="prog-pct" style="color:${c}">${pct > 0 ? pct.toFixed(0) : '0'}%</span></div>`;
+  }
+
+  function isPastOrCurrentCheck(m) {
+    return (m.year < nowYear) || (m.year === nowYear && m.monthNum <= nowMonth);
+  }
+
+  // Build individual month PM grids (visible months)
+  let monthGridsHTML = '';
+  const tagColors = {
+    apr: 'tag-carry', may: 'tag-fy26',
+    jun: 'tag-fy27', jul: 'tag-fy27', aug: 'tag-fy27', sep: 'tag-fy27',
+    oct: 'tag-fy27', nov: 'tag-fy27', dec: 'tag-fy27',
+    jan: '', feb: '', mar: ''
+  };
+  const greenTag = 'background:rgba(57,255,154,0.1);color:var(--accent-green);border:1px solid rgba(57,255,154,0.2)';
+
+  visibleMonths.forEach(m => {
+    const rows = pms.map(pm => {
+      const pmProjs = projects.filter(p => p.pm === pm);
+      const projected = pmProjs.reduce((s, p) => s + (p[`${m.key}_planned`]||0), 0);
+      const forsure   = pmProjs.reduce((s, p) => s + (p[`${m.key}_forsure`]||0), 0);
+      const achieved  = pmProjs.reduce((s, p) => s + (p[`${m.key}_total`]||0), 0);
+      const projCount = pmProjs.filter(p => (p[`${m.key}_planned`]||0) > 0 || (p[`${m.key}_total`]||0) > 0).length;
+      return { pm, projected, forsure, achieved, projCount };
+    }).filter(r => r.projected > 0 || r.achieved > 0 || r.forsure > 0);
+
+    if (rows.length === 0 && !isPastOrCurrentCheck(m)) return; // only skip future months with no data
+
+    // For current/past months with no data, show empty table with message
+
+    const totalProj = rows.reduce((s,r)=>s+r.projected,0);
+    const totalFore = rows.reduce((s,r)=>s+r.forsure,0);
+    const totalAch  = rows.reduce((s,r)=>s+r.achieved,0);
+    const tagClass = tagColors[m.key];
+    const tagStyle = (m.key === 'jan' || m.key === 'feb' || m.key === 'mar') ? `style="${greenTag}"` : ``;
+
+    const rowsHTML = rows.length > 0
+      ? rows.map(r => {
+          const pct = r.projected > 0 ? (r.achieved / r.projected * 100) : 0;
+          const c = pmColor(r.pm);
+          return `<tr>
+            <td style="white-space:nowrap"><span class="pm-badge" style="background:${c.bg};color:${c.color}">${r.pm}</span></td>
+            <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted)">${r.projCount}</td>
+            <td class="td-num"><span class="num-cyan">${r.projected > 0 ? r.projected.toFixed(2) : '—'}</span></td>
+            <td class="td-num"><span style="color:var(--accent-teal)">${r.forsure > 0 ? r.forsure.toFixed(2) : '—'}</span></td>
+            <td class="td-num"><span class="num-green">${r.achieved > 0 ? r.achieved.toFixed(2) : '—'}</span></td>
+            <td style="min-width:110px">${r.projected > 0 ? progBar(pct) : '<span style="color:var(--text-muted);font-size:9px">No plan set</span>'}</td>
+          </tr>`;
+        }).join('')
+      : `<tr><td colspan="6" style="text-align:center;padding:12px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:10px">📋 No dispatch data entered for ${m.label} yet</td></tr>`;
+
+    const forsureRowsHTML = rows.length > 0
+      ? rows.map(r => {
+          const pct = r.forsure > 0 ? (r.achieved / r.forsure * 100) : 0;
+          const c = pmColor(r.pm);
+          return `<tr>
+            <td style="white-space:nowrap"><span class="pm-badge" style="background:${c.bg};color:${c.color}">${r.pm}</span></td>
+            <td class="td-num"><span style="color:var(--accent-teal)">${r.forsure > 0 ? r.forsure.toFixed(2) : '—'}</span></td>
+            <td class="td-num"><span class="num-green">${r.achieved > 0 ? r.achieved.toFixed(2) : '—'}</span></td>
+            <td style="min-width:110px">${r.forsure > 0 ? progBar(pct) : '<span style="color:var(--text-muted);font-size:10px">No commitment</span>'}</td>
+          </tr>`;
+        }).join('')
+      : `<tr><td colspan="4" style="text-align:center;padding:12px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:10px">No data yet</td></tr>`;
+
+    monthGridsHTML += `
+    <div class="section-header">
+      <span class="section-tag ${tagClass}" ${tagStyle}>${m.label}</span>
+      <span class="section-title">PM-wise Performance Analysis</span>
+      <span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text-muted);margin-left:10px">
+        Planned: ₹${totalProj.toFixed(2)}L · Achieved: ₹${totalAch.toFixed(2)}L · 
+        ${totalProj>0?'<span style="color:'+(totalAch>=totalProj?'var(--accent-green)':'var(--accent-amber)')+'">'+((totalAch/totalProj)*100).toFixed(1)+'%</span>':'—'}
+      </span>
+    </div>
+    <div class="pm-grid" id="pmGrid_${m.key}">
+      <div class="pm-table-wrap">
+        <div class="pm-table-title projected">📊 ${m.label} — Projected vs Achieved</div>
+        <table class="pm-tbl">
+          <thead><tr>
+            <th style="text-align:left">PM</th>
+            <th>Active Projects</th>
+            <th>Projected (₹L)</th>
+            <th>For Sure (₹L)</th>
+            <th>Achieved (₹L)</th>
+            <th>Achievement %</th>
+          </tr></thead>
+          <tbody>${rowsHTML}</tbody>
+          <tfoot><tr class="total-row">
+            <td><b>TOTAL</b></td>
+            <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:10px">${rows.reduce((s,r)=>s+r.projCount,0)}</td>
+            <td class="td-num" style="color:var(--accent-cyan)">${totalProj > 0 ? totalProj.toFixed(2) : '—'}</td>
+            <td class="td-num" style="color:var(--accent-teal)">${totalFore > 0 ? totalFore.toFixed(2) : '—'}</td>
+            <td class="td-num" style="color:var(--accent-green)">${totalAch > 0 ? totalAch.toFixed(2) : '—'}</td>
+            <td style="color:var(--accent-cyan);font-family:'JetBrains Mono',monospace;font-size:10px;text-align:right;padding-right:8px">${totalProj > 0 ? (totalAch/totalProj*100).toFixed(1) : 0}%</td>
+          </tr></tfoot>
+        </table>
+        <!-- FOR SURE vs ACHIEVED CHART -->
+        <div class="pm-forsure-chart-wrap"><canvas id="fsaChart_${m.key}"></canvas></div>
+      </div>
+      <div class="pm-table-wrap">
+        <div class="pm-table-title forsure">✅ ${m.label} — For Sure vs Achieved</div>
+        <table class="pm-tbl">
+          <thead><tr>
+            <th style="text-align:left">PM</th>
+            <th>For Sure (₹L)</th>
+            <th>Achieved (₹L)</th>
+            <th>Coverage %</th>
+          </tr></thead>
+          <tbody>${forsureRowsHTML}</tbody>
+          <tfoot><tr class="total-row">
+            <td><b>TOTAL</b></td>
+            <td class="td-num" style="color:var(--accent-teal)">${totalFore > 0 ? totalFore.toFixed(2) : '—'}</td>
+            <td class="td-num" style="color:var(--accent-green)">${totalAch > 0 ? totalAch.toFixed(2) : '—'}</td>
+            <td style="color:var(--accent-cyan);font-family:'JetBrains Mono',monospace;font-size:10px;text-align:right;padding-right:8px">${totalFore > 0 ? (totalAch/totalFore*100).toFixed(1) : 0}%</td>
+          </tr></tfoot>
+        </table>
+      </div>
+    </div>`;
+  });
+
+  // ── CUMULATIVE FY TABLE ──
+  const ALL_MONTH_KEYS = ['apr','may','jun','jul','aug','sep','oct','nov','dec','jan','feb','mar'];
+  const cumulRows = pms.map(pm => {
+    const pmProjs = projects.filter(p => p.pm === pm);
+    let projected = 0, forsure = 0, achieved = 0;
+    ALL_MONTH_KEYS.forEach(mk => {
+      projected += pmProjs.reduce((s, p) => s + (p[`${mk}_planned`]||0), 0);
+      forsure   += pmProjs.reduce((s, p) => s + (p[`${mk}_forsure`]||0), 0);
+      achieved  += pmProjs.reduce((s, p) => s + (p[`${mk}_total`]||0), 0);
+    });
+    const billingDone = pmProjs.reduce((s, p) => s + (p.billing_done||0), 0);
+    const shortClose  = pmProjs.reduce((s, p) => s + (p.short_close||0), 0);
+    return { pm, projected, forsure, achieved, billingDone, shortClose };
+  });
+
+  const cTotalProj = cumulRows.reduce((s,r)=>s+r.projected,0);
+  const cTotalFore = cumulRows.reduce((s,r)=>s+r.forsure,0);
+  const cTotalAch  = cumulRows.reduce((s,r)=>s+r.achieved,0);
+  const cTotalBill = cumulRows.reduce((s,r)=>s+r.billingDone,0);
+  const cTotalSC   = cumulRows.reduce((s,r)=>s+r.shortClose,0);
+
+  const monthsWithData = ALL_MONTHS.filter(m =>
+    projects.some(p => (p[`${m.key}_planned`]||0) > 0 || (p[`${m.key}_total`]||0) > 0)
+  );
+  const lbl = monthsWithData.length > 0 ? monthsWithData.map(m=>m.label).join(' + ') : 'No data yet';
+  // NOTE: cumulMonthsLabel set AFTER pmTab.innerHTML (element must exist first)
+
+  const cumulHTML = `
+  <div class="pm-table-wrap" style="grid-column:1/-1">
+    <div class="pm-table-title" style="background:linear-gradient(90deg,rgba(255,215,0,0.06),transparent);border-left:3px solid var(--accent-gold);color:var(--accent-gold)">
+      📈 FY 2026-27 Cumulative — PM Wise Running Total (All Months)
+    </div>
+    <table class="pm-tbl" style="width:100%">
+      <thead><tr>
+        <th style="text-align:left">PM</th>
+        <th style="color:var(--accent-cyan)">Total Projected (₹L)</th>
+        <th style="color:var(--accent-teal)">Total For Sure (₹L)</th>
+        <th style="color:var(--accent-green)">Total Achieved (₹L)</th>
+        <th style="color:var(--accent-amber)">Billing Done (₹L)</th>
+        <th style="color:var(--accent-teal)">Short Close (₹L)</th>
+        <th style="min-width:130px">Proj. vs Achieved</th>
+        ${ALL_MONTHS.map(m=>`<th style="color:var(--text-muted);font-size:8px;letter-spacing:0.5px">${m.label}<br>Achieved</th>`).join('')}
+      </tr></thead>
+      <tbody>
+        ${cumulRows.map(r => {
+          const pctProj = r.projected > 0 ? (r.achieved / r.projected * 100) : 0;
+          const c = PM_COLORS[r.pm] || { bg: 'rgba(100,150,200,0.15)', color: '#6496c8' };
+          const monthCells = ALL_MONTHS.map(m => {
+            const mAch = projects.filter(p=>p.pm===r.pm).reduce((s,p)=>s+(p[`${m.key}_total`]||0),0);
+            return `<td class="td-num" style="font-size:10px"><span style="color:${mAch>0?'var(--accent-green)':'var(--text-muted)'}">${mAch>0?mAch.toFixed(2):'—'}</span></td>`;
+          }).join('');
+          return `<tr>
+            <td style="white-space:nowrap;padding:8px 10px"><span class="pm-badge" style="background:${c.bg};color:${c.color};font-size:11px">${r.pm}</span></td>
+            <td class="td-num"><span class="num-cyan">${r.projected > 0 ? r.projected.toFixed(2) : '—'}</span></td>
+            <td class="td-num"><span style="color:var(--accent-teal)">${r.forsure > 0 ? r.forsure.toFixed(2) : '—'}</span></td>
+            <td class="td-num"><span style="color:var(--accent-green);font-weight:600">${r.achieved > 0 ? r.achieved.toFixed(2) : '—'}</span></td>
+            <td class="td-num"><span style="color:var(--accent-amber)">${r.billingDone > 0 ? r.billingDone.toFixed(2) : '—'}</span></td>
+            <td class="td-num"><span style="color:var(--accent-teal)">${r.shortClose > 0 ? r.shortClose.toFixed(2) : '—'}</span></td>
+            <td style="min-width:130px">${progBar(pctProj)}</td>
+            ${monthCells}
+          </tr>`;
+        }).join('')}
+      </tbody>
+      <tfoot><tr class="total-row">
+        <td style="padding:8px 10px"><b>GRAND TOTAL</b></td>
+        <td class="td-num" style="color:var(--accent-cyan);font-size:13px">${cTotalProj > 0 ? cTotalProj.toFixed(2) : '—'}</td>
+        <td class="td-num" style="color:var(--accent-teal);font-size:13px">${cTotalFore > 0 ? cTotalFore.toFixed(2) : '—'}</td>
+        <td class="td-num" style="color:var(--accent-green);font-size:13px;font-weight:700">${cTotalAch > 0 ? cTotalAch.toFixed(2) : '—'}</td>
+        <td class="td-num" style="color:var(--accent-amber);font-size:13px">${cTotalBill > 0 ? cTotalBill.toFixed(2) : '—'}</td>
+        <td class="td-num" style="color:var(--accent-teal);font-size:13px">${cTotalSC > 0 ? cTotalSC.toFixed(2) : '—'}</td>
+        <td style="color:var(--accent-cyan);font-family:'JetBrains Mono',monospace;font-size:11px;text-align:right;padding-right:8px">${cTotalProj>0?(cTotalAch/cTotalProj*100).toFixed(1):0}%</td>
+        ${ALL_MONTHS.map(m => {
+          const mTotal = projects.reduce((s,p)=>s+(p[`${m.key}_total`]||0),0);
+          return `<td class="td-num" style="color:var(--accent-green);font-size:11px">${mTotal>0?mTotal.toFixed(2):'—'}</td>`;
+        }).join('')}
+      </tr></tfoot>
+    </table>
+  </div>`;
+
+  // Build the PM tab content
+  const pmTab = document.getElementById('tab-pm');
+  pmTab.innerHTML = `
+    <div style="padding:8px 24px 4px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted)">
+      📅 PM Performance auto-updates based on current date. New month section appears on 1st of each month.
+    </div>
+    ${monthGridsHTML}
+    <div class="section-header" style="margin-top:8px">
+      <span class="section-tag" style="background:rgba(255,215,0,0.1);color:var(--accent-gold);border:1px solid rgba(255,215,0,0.25)">FY 2026-27</span>
+      <span class="section-title" style="color:var(--accent-gold)">Cumulative PM Performance — Running Total (Apr 2026 → Mar 2027)</span>
+      <span id="cumulMonthsLabel" style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text-muted);margin-left:10px;padding:2px 7px;background:rgba(255,215,0,0.06);border:1px solid rgba(255,215,0,0.15);border-radius:3px"></span>
+    </div>
+    <div class="pm-grid" id="cumulPMGrid">${cumulHTML}</div>`;
+
+  // NOW set cumulMonthsLabel — element exists in DOM after innerHTML above
+  const cumulLblEl = document.getElementById('cumulMonthsLabel');
+  if (cumulLblEl) cumulLblEl.textContent = lbl.length > 80 ? `${monthsWithData.length} months` : lbl;
+
+  // ── RENDER FOR SURE vs ACHIEVED CHARTS ──
+  const pms5 = ['Sourabh', 'Harshit', 'Harsh Gaur', 'Dipender', 'Sunil'];
+  const pmColors5 = ['#00d4ff','#a855f7','#ff6b35','#ffb347','#00b8a0'];
+
+  function makeChart(canvasId, labels, forsureData, achievedData, chartTitle) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    if (canvas._chartInst) { canvas._chartInst.destroy(); }
+    canvas._chartInst = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: 'For Sure (₹L)', data: forsureData, backgroundColor: 'rgba(0,184,160,0.6)', borderColor: '#00b8a0', borderWidth: 1, borderRadius: 4 },
+          { label: 'Achieved (₹L)', data: achievedData, backgroundColor: 'rgba(57,255,154,0.65)', borderColor: '#39ff9a', borderWidth: 1, borderRadius: 4 }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#6a96c0', font: { family: "'JetBrains Mono', monospace", size: 10 } } },
+          title: { display: false }
+        },
+        scales: {
+          x: { ticks: { color: '#6a96c0', font: { size: 10 } }, grid: { color: 'rgba(28,46,68,0.5)' } },
+          y: { ticks: { color: '#6a96c0', font: { size: 9 }, callback: v => '₹'+v+'L' }, grid: { color: 'rgba(28,46,68,0.5)' } }
+        }
+      }
+    });
+  }
+
+  // Per-month charts
+  visibleMonths.forEach(m => {
+    const forsureData = pms5.map(pm => projects.filter(p=>p.pm===pm).reduce((s,p)=>s+(p[`${m.key}_forsure`]||0),0));
+    const achievedData = pms5.map(pm => projects.filter(p=>p.pm===pm).reduce((s,p)=>s+(p[`${m.key}_total`]||0),0));
+    if (forsureData.some(v=>v>0) || achievedData.some(v=>v>0)) {
+      setTimeout(() => makeChart(`fsaChart_${m.key}`, pms5, forsureData, achievedData, m.label), 50);
+    }
+  });
+
+  // Title screen chart — cumulative For Sure vs Achieved per PM
+  const titleFSData = pms5.map(pm => ALL_MONTH_KEYS.reduce((s,mk)=>s+projects.filter(p=>p.pm===pm).reduce((ss,p)=>ss+(p[`${mk}_forsure`]||0),0),0));
+  const titleAchData = pms5.map(pm => ALL_MONTH_KEYS.reduce((s,mk)=>s+projects.filter(p=>p.pm===pm).reduce((ss,p)=>ss+(p[`${mk}_total`]||0),0),0));
+  setTimeout(() => makeChart('titleFSAChart', pms5, titleFSData, titleAchData, 'FY Cumulative'), 100);
+}
+
+function renderLog() {
+  const list = document.getElementById('logList');
+  if (entryLog.length === 0) {
+    list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-family:\'JetBrains Mono\',monospace;font-size:11px;">No entries yet.</div>';
+    return;
+  }
+  list.innerHTML = entryLog.map(e => `
+    <div class="log-item">
+      <span class="log-time">${e.time}</span>
+      <span class="log-project">${e.project.substring(0,35)}</span>
+      <span class="log-change">${e.field}</span>
+      <span style="color:var(--text-muted)">→</span>
+      <span class="log-val">₹${e.to}L</span>
+    </div>
+  `).join('');
+}
+
+function renderAll() {
+  updateKPIs();
+  renderMainTable();
+  renderWeeklyTable('aprTable', 'aprTbody', 'apr', 'aprCount');
+  renderWeeklyTable('mayTable', 'mayTbody', 'may', 'mayCount');
+  renderWeeklyTable('junTable', 'junTbody', 'jun', 'junCount');
+  renderWeeklyTable('julTable', 'julTbody', 'jul', 'julCount');
+  renderWeeklyTable('augTable', 'augTbody', 'aug', 'augCount');
+  renderWeeklyTable('sepTable', 'sepTbody', 'sep', 'sepCount');
+  renderWeeklyTable('octTable', 'octTbody', 'oct', 'octCount');
+  renderWeeklyTable('novTable', 'novTbody', 'nov', 'novCount');
+  renderWeeklyTable('decTable', 'decTbody', 'dec', 'decCount');
+  renderWeeklyTable('janTable', 'janTbody', 'jan', 'janCount');
+  renderWeeklyTable('febTable', 'febTbody', 'feb', 'febCount');
+  renderWeeklyTable('marTable', 'marTbody', 'mar', 'marCount');
+  renderLVSTable();
+  renderPMPerformance();
+  renderLog();
+}
+
+// ── FILTER HANDLERS ──
+function filterTable() { renderMainTable(); updateKPIs(); }
+function filterApr() { renderWeeklyTable('aprTable', 'aprTbody', 'apr', 'aprCount'); }
+function filterMay() { renderWeeklyTable('mayTable', 'mayTbody', 'may', 'mayCount'); }
+function filterMonth(m) {
+  const monthMap = {
+    jun:'junTable,junTbody,junCount', jul:'julTable,julTbody,julCount',
+    aug:'augTable,augTbody,augCount', sep:'sepTable,sepTbody,sepCount',
+    oct:'octTable,octTbody,octCount', nov:'novTable,novTbody,novCount',
+    dec:'decTable,decTbody,decCount', jan:'janTable,janTbody,janCount',
+    feb:'febTable,febTbody,febCount', mar:'marTable,marTbody,marCount',
+  };
+  if (monthMap[m]) {
+    const [tbl,tbody,cnt] = monthMap[m].split(',');
+    renderWeeklyTable(tbl, tbody, m, cnt);
+  }
+}
+
+// ── TAB SWITCHING ──
+function switchTab(tab) {
+  const allTabs = ['all','apr','may','jun','jul','aug','sep','oct','nov','dec','jan','feb','mar','lvs','pm','log'];
+  document.querySelectorAll('.tab-btn').forEach((btn, i) => {
+    btn.classList.toggle('active', allTabs[i] === tab);
+  });
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.add('active');
+  // Reset scroll position when switching tabs
+  const tw = document.querySelector('#tab-' + tab + ' .table-wrap');
+  if (tw) { tw.scrollTop = 0; tw.scrollLeft = 0; }
+  // Show inline PM chart based on which tab is active
+  showInlineChart(tab);
+}
+
+let _inlineChartInst = null;
+function showInlineChart(tab) {
+  const panel = document.getElementById('inlineChartPanel');
+  const titleEl = document.getElementById('inlineChartTitle');
+  const canvas = document.getElementById('inlineChartCanvas');
+  if(!panel || !canvas) return;
+
+  const pms5 = ['Sourabh','Harshit','Harsh Gaur','Dipender','Sunil'];
+  const pmColors5 = ['#00d4ff','#a855f7','#ff6b35','#ffb347','#00b8a0'];
+  const ALL_MK = ['apr','may','jun','jul','aug','sep','oct','nov','dec','jan','feb','mar'];
+  const MONTH_LABELS = {apr:'APR 2026',may:'MAY 2026',jun:'JUN 2026',jul:'JUL 2026',aug:'AUG 2026',sep:'SEP 2026',oct:'OCT 2026',nov:'NOV 2026',dec:'DEC 2026',jan:'JAN 2027',feb:'FEB 2027',mar:'MAR 2027'};
+
+  let labels, forsureData, achievedData, chartTitle;
+
+  if (tab === 'all') {
+    // Cumulative all months per PM
+    chartTitle = '📊 PM-wise For Sure vs Achieved — FY 2026-27 Cumulative';
+    labels = pms5;
+    forsureData = pms5.map(pm => ALL_MK.reduce((s,mk)=>s+projects.filter(p=>p.pm===pm).reduce((ss,p)=>ss+(p[mk+'_forsure']||0),0),0));
+    achievedData = pms5.map(pm => ALL_MK.reduce((s,mk)=>s+projects.filter(p=>p.pm===pm).reduce((ss,p)=>ss+(p[mk+'_total']||0),0),0));
+  } else if (MONTH_LABELS[tab]) {
+    // Specific month per PM
+    chartTitle = `📊 PM-wise For Sure vs Achieved — ${MONTH_LABELS[tab]}`;
+    labels = pms5;
+    forsureData = pms5.map(pm => projects.filter(p=>p.pm===pm).reduce((s,p)=>s+(p[tab+'_forsure']||0),0));
+    achievedData = pms5.map(pm => projects.filter(p=>p.pm===pm).reduce((s,p)=>s+(p[tab+'_total']||0),0));
+  } else {
+    panel.style.display = 'none';
+    return;
+  }
+
+  const hasData = forsureData.some(v=>v>0) || achievedData.some(v=>v>0);
+  if (!hasData) { panel.style.display = 'none'; return; }
+
+  panel.style.display = 'block';
+  if(titleEl) titleEl.textContent = chartTitle;
+
+  if(_inlineChartInst) { _inlineChartInst.destroy(); _inlineChartInst = null; }
+  _inlineChartInst = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label:'For Sure (₹L)', data:forsureData, backgroundColor:'rgba(0,184,160,0.6)', borderColor:'#00b8a0', borderWidth:1, borderRadius:4 },
+        { label:'Achieved (₹L)', data:achievedData, backgroundColor:'rgba(57,255,154,0.65)', borderColor:'#39ff9a', borderWidth:1, borderRadius:4 }
+      ]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      plugins:{
+        legend:{labels:{color:'#6a96c0',font:{family:"'JetBrains Mono', monospace",size:10}}},
+        tooltip:{callbacks:{label:ctx=>`₹${ctx.parsed.y.toFixed(2)}L`}}
+      },
+      scales:{
+        x:{ticks:{color:'#6a96c0',font:{size:10}},grid:{color:'rgba(28,46,68,0.5)'}},
+        y:{ticks:{color:'#6a96c0',font:{size:9},callback:v=>'₹'+v+'L'},grid:{color:'rgba(28,46,68,0.5)'}}
+      }
+    }
+  });
+}
+
+// ── ADD PROJECT ──
+function toggleAddForm(sheet) {
+  const f = document.getElementById('addFormAll');
+  f.classList.toggle('open');
+}
+
+function addProject() {
+  const name = document.getElementById('np-name').value.trim();
+  if (!name) { alert('Project name is required'); return; }
+  const newMonthFields = {};
+  ['jun','jul','aug','sep','oct','nov','dec','jan','feb','mar'].forEach(m => {
+    newMonthFields[`${m}_planned`]=0; newMonthFields[`${m}_forsure`]=0; newMonthFields[`${m}_estimated`]=0;
+    newMonthFields[`${m}_w1_p`]=0; newMonthFields[`${m}_w1_a`]=0;
+    newMonthFields[`${m}_w2_p`]=0; newMonthFields[`${m}_w2_a`]=0;
+    newMonthFields[`${m}_w3_p`]=0; newMonthFields[`${m}_w3_a`]=0;
+    newMonthFields[`${m}_w4_p`]=0; newMonthFields[`${m}_w4_a`]=0;
+    newMonthFields[`${m}_total`]=0;
+  });
+  const newProj = {
+    sno: parseInt(document.getElementById('np-sno').value) || (Math.max(...projects.map(p=>p.sno||0)) + 1),
+    name,
+    proj_number: document.getElementById('np-cr').value.trim(),
+    pm: document.getElementById('np-pm').value,
+    so_no: document.getElementById('np-so').value.trim(),
+    section: document.getElementById('np-section').value,
+    is_lvs: document.getElementById('np-lvs').value === '1',
+    proj_status: '', sc_done: 'na', amend_done: 'na',
+    carry_po: 0, carry_billed: 0, carry_pending: 0,
+    po_value: parseFloat(document.getElementById('np-po').value) || 0,
+    billing_done: 0, pending_billing: parseFloat(document.getElementById('np-po').value) || 0,
+    apr_planned: 0, apr_forsure: 0, apr_estimated: 0,
+    apr_w1_p:0, apr_w1_a:0, apr_w2_p:0, apr_w2_a:0,
+    apr_w3_p:0, apr_w3_a:0, apr_w4_p:0, apr_w4_a:0, apr_total:0,
+    may_planned: 0, may_forsure: 0, may_estimated: 0,
+    may_w1_p:0, may_w1_a:0, may_w2_p:0, may_w2_a:0,
+    may_w3_p:0, may_w3_a:0, may_w4_p:0, may_w4_a:0, may_total:0,
+    short_close: 0,
+    ...newMonthFields
+  };
+  projects.push(newProj);
+  logEntry(name, 'PROJECT ADDED', '', newProj.po_value.toFixed(2));
+  autoSave();
+  toggleAddForm('all');
+  ['np-sno','np-name','np-cr','np-so','np-po'].forEach(id => document.getElementById(id).value = '');
+  renderAll();
+}
+
+// ── EXPORT CSV ──
+function exportCSV() {
+  const headers = ['S.No','Project Name','CR No.','PM','S.O. No.','Section','PO Value','Billing Done','Pending Billing','Short Close','APR Total','MAY Total','Is LVS'];
+  const rows = projects.map(p => [p.sno, `"${p.name}"`, p.proj_number, p.pm, p.so_no, p.section, p.po_value, p.billing_done, p.pending_billing, p.short_close||0, p.apr_total||0, p.may_total||0, p.is_lvs ? 'Yes' : 'No'].join(','));
+  const csv = [headers.join(','), ...rows].join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = `OnePWS_Dispatch_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
+
+function exportLog() {
+  const csv = ['Time,Project,Field,New Value', ...entryLog.map(e => `${e.time},"${e.project}","${e.field}",${e.to}`)].join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = `OnePWS_Log_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
+
+function clearLog() {
+  if (confirm('Clear all entry log?')) { entryLog = []; renderLog(); autoSave(); }
+}
+
+// ── CLOCK ──
+function updateClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent = now.toLocaleTimeString('en-IN', {hour12:false}) + ' · ' + now.toLocaleDateString('en-IN');
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// Auto-save every 30 seconds
+setInterval(autoSave, 30000);
+
+// ── INIT ──
+loadData();
+renderAll();
+setTimeout(() => showInlineChart('all'), 200);
+
+// ── STICKY MIRROR SCROLLBAR ──
+// Keeps a sticky bottom scrollbar synced with the active table-wrap
+(function initMirrorScrollbar() {
+  const mirrorBar = document.getElementById('mirrorScrollBar');
+  const mirrorInner = document.getElementById('mirrorScrollInner');
+  let activeWrap = null;
+  let syncingFromMirror = false;
+  let syncingFromWrap = false;
+
+  function updateMirror() {
+    // Find the table-wrap inside the active tab
+    const activeTab = document.querySelector('.tab-content.active');
+    if (!activeTab) { mirrorBar.style.display = 'none'; return; }
+    const wrap = activeTab.querySelector('.table-wrap');
+    if (!wrap) { mirrorBar.style.display = 'none'; return; }
+    
+    const scrollWidth = wrap.scrollWidth;
+    const clientWidth = wrap.clientWidth;
+    if (scrollWidth <= clientWidth + 4) { mirrorBar.style.display = 'none'; return; }
+
+    mirrorBar.style.display = 'block';
+    mirrorInner.style.width = scrollWidth + 'px';
+    mirrorBar.style.left = '0';
+    mirrorBar.style.right = '0';
+
+    if (activeWrap !== wrap) {
+      // Detach old listeners
+      if (activeWrap) {
+        activeWrap._mirrorHandler && activeWrap.removeEventListener('scroll', activeWrap._mirrorHandler);
+      }
+      activeWrap = wrap;
+      // Sync wrap→mirror
+      wrap._mirrorHandler = function() {
+        if (syncingFromMirror) return;
+        syncingFromWrap = true;
+        mirrorBar.scrollLeft = wrap.scrollLeft;
+        syncingFromWrap = false;
+      };
+      wrap.addEventListener('scroll', wrap._mirrorHandler);
+      // Sync mirror→wrap
+      mirrorBar.onscroll = function() {
+        if (syncingFromWrap) return;
+        syncingFromMirror = true;
+        wrap.scrollLeft = mirrorBar.scrollLeft;
+        syncingFromMirror = false;
+      };
+      mirrorBar.scrollLeft = wrap.scrollLeft;
+    }
+  }
+
+  // Update on tab switch (patch switchTab)
+  const _origSwitchTab = window.switchTab;
+  window.switchTab = function(tab) {
+    _origSwitchTab(tab);
+    setTimeout(updateMirror, 50);
+  };
+
+  // Update on render
+  const _origRenderAll = window.renderAll;
+  window.renderAll = function() {
+    _origRenderAll();
+    setTimeout(updateMirror, 80);
+  };
+
+  // Update on resize
+  window.addEventListener('resize', updateMirror);
+  // Initial
+  setTimeout(updateMirror, 300);
+})();
+
+function showKpiDetail(type) {
+  const modal = document.getElementById('kpiDetailModal');
+  const box   = document.getElementById('kpiDetailBox');
+  if (!modal || !box) return;
+  const ap = projects.filter(p => p.name && p.name.trim());
+  const totalPO   = ap.reduce((s,p)=>s+(p.po_value||0),0);
+  const totalDone = ap.reduce((s,p)=>s+(p.billing_done||0),0);
+  const totalPend = ap.reduce((s,p)=>s+Math.max(0,p.pending_billing||0),0);
+  const totalSC   = ap.reduce((s,p)=>s+(p.short_close||0),0);
+  const overProjs = ap.filter(p=>p.billing_done>p.po_value&&p.po_value>0);
+  const pct = totalPO>0?(totalDone/totalPO*100).toFixed(1):0;
+  const pms = ['Sourabh','Harshit','Harsh Gaur','Dipender','Sunil'];
+
+  const pmRows = (field) => pms.map(pm=>{
+    const val=ap.filter(p=>p.pm===pm).reduce((s,p)=>s+(p[field]||0),0);
+    if(!val)return'';
+    const c=PM_COLORS[pm]||{color:'#aaa'};
+    return `<div class="kpi-detail-row"><span class="kpi-detail-lbl"><span style="color:${c.color}">● </span>${pm}</span><span class="kpi-detail-val" style="color:${c.color}">₹ ${val.toFixed(2)} L</span></div>`;
+  }).join('');
+
+  const secLabels={'CARRY_FORWARD':'Carry Forward','FY25-26':'FY 25-26','FY26-27':'FY 26-27'};
+  const secRows = (field) => Object.entries(secLabels).map(([k,l])=>{
+    const sp=ap.filter(p=>p.section===k);
+    const val=sp.reduce((s,p)=>s+(p[field]||0),0);
+    if(!val)return'';
+    return `<div class="kpi-detail-row"><span class="kpi-detail-lbl">${l} (${sp.length})</span><span class="kpi-detail-val">₹ ${val.toFixed(2)} L</span></div>`;
+  }).join('');
+
+  const cfgs = {
+    po:{title:'Total Order Value',color:'var(--accent-cyan)',main:'₹ '+totalPO.toFixed(2)+' L',sub:'Total Order Book · FY 2026-27',
+      body:`<div class="kpi-detail-section">PM-wise PO</div>${pmRows('po_value')}<div class="kpi-detail-section">Section-wise PO</div>${secRows('po_value')}<div class="kpi-detail-row"><span class="kpi-detail-lbl">LVS Portfolio</span><span class="kpi-detail-val" style="color:var(--accent-gold)">₹ ${ap.filter(p=>p.is_lvs).reduce((s,p)=>s+(p.po_value||0),0).toFixed(2)} L</span></div>`},
+    done:{title:'Billing Done',color:'var(--accent-green)',main:'₹ '+totalDone.toFixed(2)+' L',sub:`Achieved · ${pct}% of Total PO`,
+      body:`<div class="kpi-detail-section">PM-wise Billed</div>${pmRows('billing_done')}<div class="kpi-detail-section">APR 2026</div>${pms.map(pm=>{const v=ap.filter(p=>p.pm===pm).reduce((s,p)=>s+(p.apr_total||0),0);if(!v)return'';const c=PM_COLORS[pm]||{color:'#aaa'};return`<div class="kpi-detail-row"><span class="kpi-detail-lbl"><span style="color:${c.color}">● </span>${pm}</span><span class="kpi-detail-val" style="color:${c.color}">₹ ${v.toFixed(2)} L</span></div>`;}).join('')}<div class="kpi-detail-section">MAY 2026</div>${pms.map(pm=>{const v=ap.filter(p=>p.pm===pm).reduce((s,p)=>s+(p.may_total||0),0);if(!v)return'';const c=PM_COLORS[pm]||{color:'#aaa'};return`<div class="kpi-detail-row"><span class="kpi-detail-lbl"><span style="color:${c.color}">● </span>${pm}</span><span class="kpi-detail-val" style="color:${c.color}">₹ ${v.toFixed(2)} L</span></div>`;}).join('')}`},
+    pending:{title:'Pending Billing',color:'var(--accent-amber)',main:'₹ '+totalPend.toFixed(2)+' L',sub:'Balance against PO',
+      body:`<div class="kpi-detail-section">Top 10 Pending Projects</div>${ap.filter(p=>(p.pending_billing||0)>0).sort((a,b)=>b.pending_billing-a.pending_billing).slice(0,10).map(p=>`<div class="kpi-detail-row"><span class="kpi-detail-lbl">#${p.sno} ${p.name.substring(0,26)}</span><span class="kpi-detail-val" style="color:var(--accent-amber)">₹ ${p.pending_billing.toFixed(2)} L</span></div>`).join('')}<div class="kpi-detail-section">PM-wise Pending</div>${pmRows('pending_billing')}`},
+    shortclose:{title:'Short Close Amount',color:'var(--accent-teal)',main:'₹ '+totalSC.toFixed(2)+' L',sub:'Closed before full PO utilization',
+      body:ap.filter(p=>(p.short_close||0)>0).map(p=>`<div class="kpi-detail-row"><span class="kpi-detail-lbl">#${p.sno} ${p.name.substring(0,26)}</span><span class="kpi-detail-val" style="color:var(--accent-teal)">₹ ${p.short_close.toFixed(2)} L</span></div>`).join('')||'<div style="color:var(--accent-green);font-size:11px;padding:8px 0">✓ No short close projects</div>'},
+    overbudget:{title:'P.O. Amendment Required',color:'var(--accent-red)',main:overProjs.length+' Projects',sub:'Billing exceeds P.O. value',
+      body:overProjs.map(p=>`<div class="kpi-detail-row"><span class="kpi-detail-lbl">#${p.sno} ${p.name.substring(0,24)}</span><span class="kpi-detail-val" style="color:var(--accent-red)">+₹ ${(p.billing_done-p.po_value).toFixed(2)} L value excess</span></div><div style="font-size:9px;font-family:'JetBrains Mono',monospace;color:var(--text-muted);padding:0 0 6px 10px">PO: ₹${p.po_value.toFixed(2)}L → Billed: ₹${p.billing_done.toFixed(2)}L</div>`).join('')||'<div style="color:var(--accent-green);font-size:11px;padding:8px 0">✓ No P.O. Amendment Required</div>'},
+    projects:{title:'Active Projects',color:'var(--accent-purple)',main:ap.length+' Projects',sub:'Total Portfolio · FY 2026-27',
+      body:(()=>{
+        const statusGroups = {};
+        const statusColorMap = {
+          'EXECUTION':'#00d4ff','BILL PENDING':'#ffb347','BILL DONE':'#39ff9a',
+          'APPROVAL STAGE':'#a855f7','CIT DONE':'#00b8a0','HANDOVER STAGE':'#ff6b35',
+          'HANDOVER DONE':'#ff8c5a','COMPLETED':'#00ff88','HOLD':'#ff4d6d','CLOSED':'#6a96c0','':(null)
+        };
+        ap.forEach(p=>{const st=p.proj_status||'NOT SET';if(!statusGroups[st])statusGroups[st]=[];statusGroups[st].push(p);});
+        const statusRows = Object.entries(statusGroups).sort((a,b)=>b[1].length-a[1].length).map(([st,projs])=>{
+          const col = statusColorMap[st] || 'var(--text-secondary)';
+          const label = st === 'NOT SET' ? '⚠ Status Not Set' : st;
+          return `<div class="kpi-detail-row" style="flex-direction:column;align-items:flex-start;gap:3px;padding:8px 0">
+            <div style="display:flex;justify-content:space-between;width:100%">
+              <span class="kpi-detail-lbl" style="color:${col};font-weight:600">${label}</span>
+              <span class="kpi-detail-val" style="color:${col}">${projs.length} project${projs.length>1?'s':''}</span>
+            </div>
+            <div style="width:100%;height:3px;background:var(--border);border-radius:2px"><div style="height:100%;width:${(projs.length/ap.length*100).toFixed(0)}%;background:${col};border-radius:2px"></div></div>
+            <div style="font-size:9px;color:var(--text-muted);font-family:'JetBrains Mono',monospace">${projs.slice(0,3).map(p=>'#'+p.sno+' '+p.name.substring(0,20)).join(' · ')}${projs.length>3?` +${projs.length-3} more`:''}</div>
+          </div>`;
+        }).join('');
+        return `<div class="kpi-detail-section">📊 Status-wise Breakdown</div>${statusRows}<div class="kpi-detail-section">By PM</div>${pms.map(pm=>{const cnt=ap.filter(p=>p.pm===pm).length;if(!cnt)return'';const c=PM_COLORS[pm]||{color:'#aaa'};return`<div class="kpi-detail-row"><span class="kpi-detail-lbl"><span style="color:${c.color}">● </span>${pm}</span><span class="kpi-detail-val" style="color:${c.color}">${cnt} projects</span></div>`;}).join('')}<div class="kpi-detail-row"><span class="kpi-detail-lbl">LVS Projects</span><span class="kpi-detail-val" style="color:var(--accent-gold)">${ap.filter(p=>p.is_lvs).length} projects</span></div>`;
+      })()},
+    pct:{title:'Billing Achievement %',color:'var(--accent-orange)',main:pct+'%',sub:`₹${totalDone.toFixed(2)}L billed of ₹${totalPO.toFixed(2)}L`,
+      body:`<div class="kpi-detail-section">PM-wise Achievement</div>${pms.map(pm=>{const pmP=ap.filter(p=>p.pm===pm);const po=pmP.reduce((s,p)=>s+(p.po_value||0),0);const done=pmP.reduce((s,p)=>s+(p.billing_done||0),0);if(!po)return'';const p2=(done/po*100).toFixed(1);const c=PM_COLORS[pm]||{color:'#aaa'};const bc=parseFloat(p2)>=50?'var(--accent-green)':parseFloat(p2)>=25?'var(--accent-teal)':'var(--accent-amber)';return`<div class="kpi-detail-row" style="flex-direction:column;align-items:flex-start;gap:4px"><div style="display:flex;justify-content:space-between;width:100%"><span class="kpi-detail-lbl"><span style="color:${c.color}">● </span>${pm}</span><span class="kpi-detail-val" style="color:${bc}">${p2}% · ₹${done.toFixed(1)}L / ₹${po.toFixed(1)}L</span></div><div style="width:100%;height:4px;background:var(--border);border-radius:2px"><div style="height:100%;width:${Math.min(parseFloat(p2),100)}%;background:${bc};border-radius:2px"></div></div></div>`;}).join('')}<div class="kpi-detail-section">Month-wise</div><div class="kpi-detail-row"><span class="kpi-detail-lbl">APR 2026</span><span class="kpi-detail-val" style="color:var(--accent-cyan)">₹ ${ap.reduce((s,p)=>s+(p.apr_total||0),0).toFixed(2)} L</span></div><div class="kpi-detail-row"><span class="kpi-detail-lbl">MAY 2026</span><span class="kpi-detail-val" style="color:var(--accent-teal)">₹ ${ap.reduce((s,p)=>s+(p.may_total||0),0).toFixed(2)} L</span></div>`}
+  };
+
+  const cfg = cfgs[type]; if(!cfg) return;
+  box.innerHTML = `
+    <div class="kpi-detail-title" style="color:${cfg.color}">${cfg.title}</div>
+    <div class="kpi-detail-main" style="color:${cfg.color}">${cfg.main}</div>
+    <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);margin-bottom:14px">${cfg.sub}</div>
+    <div style="border-top:1px solid var(--border);padding-top:10px">${cfg.body}</div>
+    <button class="kpi-detail-close" onclick="closeKpiDetail()">✕ CLOSE</button>`;
+  modal.classList.add('open');
+}
+function closeKpiDetail() {
+  const m = document.getElementById('kpiDetailModal');
+  if(m) m.classList.remove('open');
+}
+document.addEventListener('keydown', e => {
+  if(e.key==='Escape') closeKpiDetail();
+});
